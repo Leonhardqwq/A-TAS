@@ -248,6 +248,7 @@ static const std::unordered_map<std::string, AKey> VirtualKeyMap = {
     // 兼容旧版的部分按键
     {"BACKSPACE", VK_BACK},
     {"CTRL", VK_CONTROL},
+    {"ALT", VK_MENU},
 };
 
 // 将std::string中的所有英文大写

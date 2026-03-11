@@ -4,7 +4,7 @@
 
 #include <climits>
 #define UNICODE
-#define A_TAS_VERSION 202602050330
+#define A_TAS_VERSION 202602212230
 #include "AsmFunc.h"
 #include "Draw.h"
 #include "asm_insert_code/asm_insert_code.h"
@@ -47,8 +47,8 @@ constexpr auto KEYBINDINGS_FILENAME = "keybindings.ini";
 constexpr auto GAME_DATA_PATH = "C:/ProgramData/PopCap Games/PlantsVsZombies/userdata/";
 
 // 预设按键
-static std::array<std::string, 33> keyDefaults = {"A", "1", "2", "C", "R", "T", "F5", "BACKSPACE", "Z", "X", "SHIFT", "V", "G", "B", "H", "Q", "W", "S", "D", "F", "E", "I", "J", "Y", "N", "U", "L", "P", "UP", "DOWN", "LEFT", "RIGHT", "O"};
-static std::array<const char*, 33> btnLabels = {"一键辅助", "减速一档", "加速一档", "0.25倍速", "10倍速", "跳到某波", "退出重进", "回档几帧", "高级暂停", "下一帧", "智能用卡", "卡槽置顶", "显示信息", "显示栈位", "智能铲除", "Dance快", "Dance慢", "女仆召唤", "女仆停滞", "女仆前进", "女仆解除", "自动收集", "小丑拦截", "气球拦截", "风炮修正", "隐藏UI", "跳过动画", "拍照模式", "视角上移", "视角下移", "视角左移", "视角右移", "PvZ初始化"};
+static std::array<std::string, 33> keyDefaults = {"A", "1", "2", "C", "R", "T", "F5", "BACKSPACE", "Z", "X", "SHIFT", "V", "G", "B", "H", "Q", "W", "S", "D", "F", "E", "I", "J", "Y", "N", "U", "L", "ALT", "UP", "DOWN", "LEFT", "RIGHT", "O"};
+static std::array<const char*, 33> btnLabels = {"一键辅助", "减速一档", "加速一档", "0.25倍速", "10倍速", "跳到某波", "退出重进", "回档几帧", "高级暂停", "下一帧", "智能用卡", "卡槽置顶", "显示信息", "显示栈位", "智能铲除", "Dance快", "Dance慢", "女仆召唤", "女仆停滞", "女仆前进", "女仆解除", "自动收集", "小丑拦截", "气球拦截", "风炮修正", "隐藏UI", "跳过动画", "六路种植", "视角上移", "视角下移", "视角左移", "视角右移", "PvZ初始化"};
 static std::array<std::string, 33> keyBindings;
 static std::array<AEdit*, 33> keyEdits;
 
@@ -136,6 +136,31 @@ struct {
     bool NormalPool = false;
     bool Row34PoolSpawn = false;
     bool SnorkelDolphinSpawn = false;
+
+    bool AllowPoolAmbush = false;
+    bool BanPoolAmbush = false;
+    bool AllowSkyAmbush = false;
+    bool BanSkyAmbush = false;
+
+    bool AllowZomboni = false;
+    bool BanZomboni = false;
+    bool AllowSnorkel = false;
+    bool BanSnorkel = false;
+    bool AllowDolphin = false;
+    bool BanDolphin = false;
+    bool AllowDancing = false;
+    bool BanDancing = false;
+    bool AllowDigger = false;
+    bool BanDigger = false;
+
+    bool AllowBobsled = false;
+
+    bool AllowPeashooterZombie = false;
+    bool AllowWallnutZombie = false;
+    bool AllowJalapenoZombie = false;
+    bool AllowGatlingPeaZombie = false;
+    bool AllowSquashZombie = false;
+    bool AllowTallnutZombie = false;
 
 } settings;
 
@@ -1661,7 +1686,7 @@ void func25() {
 }
 // 风炮修正
 void func26() {
-    *(uint8_t*)0x46DCE3 == 0x83 ? *(std::array<uint8_t, 10>*)0x46DCE3 = {0x75, 0x08, 0xD9, 0x46, 0x34, 0xD8, 0xC1, 0xD9, 0x5E, 0x34} : *(std::array<uint8_t, 10>*)0x46dce3 = {0x83, 0x7E, 0x5C, 0x0B, 0x75, 0x04, 0xDD, 0xD8, 0xEB, 0x1B};
+    *(uint8_t*)0x46DCE3 == 0x83 ? *(std::array<uint8_t, 10>*)0x46DCE3 = {0x75, 0x08, 0xD9, 0x46, 0x34, 0xD8, 0xC1, 0xD9, 0x5E, 0x34} : *(std::array<uint8_t, 10>*)0x46DCE3 = {0x83, 0x7E, 0x5C, 0x0B, 0x75, 0x04, 0xDD, 0xD8, 0xEB, 0x1B};
     CreateCaption(*(uint8_t*)0x46DCE3 == 0x83 ? "FixWind: On" : "FixWind: Off");
 }
 // 隐藏UI
@@ -1743,7 +1768,7 @@ void ResetGame() {
 
 // UI
 std::array<AConnectHandle, 33> keyHandles;
-std::array<AOperation, 33> funcs = {OneKeySwitch, Decelerate, Accelerate, ResetSpeed, Speed10x, SkiptoWave, Restart, func8, func9, func10, SmartAsh, func13, func14, func15, func16, func17, func18, func19, func20, func21, func22, func23, func24, func25, func26, func27, func28, func30, func31, func32, func33, func34, ResetGame};
+std::array<AOperation, 33> funcs = {OneKeySwitch, Decelerate, Accelerate, ResetSpeed, Speed10x, SkiptoWave, Restart, func8, func9, func10, SmartAsh, func13, func14, func15, func16, func17, func18, func19, func20, func21, func22, func23, func24, func25, func26, func27, func28, PlantShovelFireForbiddenGrid, func31, func32, func33, func34, ResetGame};
 std::array<APushButton*, 33> keyButtons;
 
 ALabel* infoLabel = nullptr;
@@ -2327,6 +2352,20 @@ AWindow* BasicPageWindow(int pageX, int pageY) {
     y += SPACE + HEIGHT;
 
     window->AddLabel("", x, y, BTNWIDTH, HEIGHT);
+    window->AddLabel("切换音乐", x + SPACE, y, BTNWIDTH - SPACE, HEIGHT);
+    x += BTNWIDTH + SPACE;
+    auto MusicComboBox = window->AddComboBox(x, y, 265, 500);
+    MusicComboBox->AddString("-", "1. Grasswalk", "2. Moongrains", "3. Watery Graves", "4. Rigor Mormist", "5. Graze the Roof", "6. Choose Your Seeds", "7. Crazy Dave", "8. Zen Garden", "9. Cerebrawl", "10. Loonboon", "11. Ultimite Battle", "12. Brainiac Maniac");
+
+    x += MusicComboBox->GetWidth() + SPACE;
+
+    window->AddLabel("", x, y, BTNWIDTH, HEIGHT);
+    auto LockBox = window->AddCheckBox("只读", x + 5, y, BTNWIDTH - 5, HEIGHT);
+
+    x = SPACE;
+    y += SPACE + HEIGHT;
+
+    window->AddLabel("", x, y, BTNWIDTH, HEIGHT);
     window->AddLabel("波长记录", x + SPACE, y, BTNWIDTH - SPACE, HEIGHT);
     x += BTNWIDTH + SPACE;
     auto WavelengthRecordComboBox = window->AddComboBox(x, y, 50, 500);
@@ -2344,46 +2383,44 @@ AWindow* BasicPageWindow(int pageX, int pageY) {
 
     x += SkipTickWaveComboBox->GetWidth() + SPACE;
 
-    window->AddLabel("", x, y, BTNWIDTH, HEIGHT);
-    window->AddLabel("只读状态", x + SPACE, y, BTNWIDTH - SPACE, HEIGHT);
-    x += BTNWIDTH + SPACE;
-    auto LockStateComboBox = window->AddComboBox(x, y, 76, 500);
-    LockStateComboBox->AddString("-", "No", "Yes");
-    if (settings.ReadOnly == -1)
-        LockStateComboBox->SetText("-");
-    if (settings.ReadOnly == 0)
-        LockStateComboBox->SetText("No");
-    if (settings.ReadOnly == 1)
-        LockStateComboBox->SetText("Yes");
-
-    x += LockStateComboBox->GetWidth() + SPACE;
-
-    x = SPACE;
-    y += SPACE + HEIGHT;
-
-    window->AddLabel("", x, y, BTNWIDTH, HEIGHT);
-    window->AddLabel("切换音乐", x + SPACE, y, BTNWIDTH - SPACE, HEIGHT);
-    x += BTNWIDTH + SPACE;
-    auto MusicComboBox = window->AddComboBox(x, y, 265, 500);
-    MusicComboBox->AddString("-", "1. Grasswalk", "2. Moongrains", "3. Watery Graves", "4. Rigor Mormist", "5. Graze the Roof", "6. Choose Your Seeds", "7. Crazy Dave", "8. Zen Garden", "9. Cerebrawl", "10. Loonboon", "11. Ultimite Battle", "12. Brainiac Maniac");
-
-    x += MusicComboBox->GetWidth() + SPACE;
-
     auto ApplyAllBtn = window->AddPushButton("一键设置", x, y, BTNWIDTH, HEIGHT);
     ApplyAllBtn->Connect([=] {
         std::strcpy(settings.SpeedGears, SpeedGearsEdit->GetText().c_str());
         SetGameSpeedGears(SpeedGearsEdit->GetText());
-        settings.WavelengthRecord = std::stoi(WavelengthRecordComboBox->GetText());
-        settings.SkipTickWave = std::stoi(SkipTickWaveComboBox->GetText());
-        if (LockStateComboBox->GetText() == "-")
-            settings.ReadOnly = -1;
-        if (LockStateComboBox->GetText() == "No")
-            settings.ReadOnly = 0;
-        if (LockStateComboBox->GetText() == "Yes")
-            settings.ReadOnly = 1;
         if (MusicComboBox->GetText() != "-")
             SetMusic(std::stoi(MusicComboBox->GetText()));
+        settings.WavelengthRecord = std::stoi(WavelengthRecordComboBox->GetText());
+        settings.SkipTickWave = std::stoi(SkipTickWaveComboBox->GetText());
         Info("一键设置成功");
+    });
+
+    x += ApplyAllBtn->GetWidth() + SPACE;
+    window->AddLabel("", x, y, BTNWIDTH, HEIGHT);
+    auto UnlockBox = window->AddCheckBox("不只读", x + 5, y, BTNWIDTH - 5, HEIGHT);
+    LockBox->SetCheck(settings.ReadOnly == 1 ? true : false);
+    UnlockBox->SetCheck(settings.ReadOnly == 0 ? true : false);
+
+    LockBox->Connect([=] {
+        if (LockBox->GetCheck()) {
+            settings.ReadOnly = 1;
+            UnlockBox->SetCheck(false);
+        } else if (UnlockBox->GetCheck()) {
+            settings.ReadOnly = 0;
+        } else {
+            settings.ReadOnly = -1;
+        }
+        Lock(AGetPvzBase()->MPtr(0x82C)->MRef<int>(0x20), AGetPvzBase()->LevelId(), settings.ReadOnly);
+    });
+    UnlockBox->Connect([=] {
+        if (UnlockBox->GetCheck()) {
+            settings.ReadOnly = 0;
+            LockBox->SetCheck(false);
+        } else if (LockBox->GetCheck()) {
+            settings.ReadOnly = 1;
+        } else {
+            settings.ReadOnly = -1;
+        }
+        Lock(AGetPvzBase()->MPtr(0x82C)->MRef<int>(0x20), AGetPvzBase()->LevelId(), settings.ReadOnly);
     });
 
     x = SPACE;
@@ -2528,7 +2565,7 @@ void zombieListInfo_update() {
     for (int w = 1; w <= 20; w++)
         for (int i = 50 * (w - 1); i < 50 * w; i++) {
             auto tmp = *(list + i);
-            if (tmp == 0xffffffff)
+            if (tmp == 0xFFFFFFFF)
                 break;
             else if (tmp >= 0 and tmp <= 32)
                 zombie_list[tmp][w - 1]++;
@@ -2713,46 +2750,156 @@ AWindow* SpawnPageWindow(int pageX, int pageY) {
 
 // 场地魔改
 void StageModify() {
-    if (settings.Row6Plant)
-        for (int i = 0; i < 9; ++i)
-            AGetMainObject()->MRef<uint32_t>(0x17C + 0x18 * i) = 1; // 六路一到九列为可种
-    if (settings.Row6Spawn)
-        AGetMainObject()->MRef<uint32_t>(0x5EC) = 1; // 六路为陆路
-    if (settings.SmallPool)
-        for (int i = 5; i < 9; ++i) {
-            AGetMainObject()->MRef<uint32_t>(0x170 + 0x18 * i) = 3; // 三路六到九列为泳池
-            AGetMainObject()->MRef<uint32_t>(0x174 + 0x18 * i) = 3; // 四路六到九列为泳池
-        }
-    if (settings.NormalPool)
-        for (int i = 0; i < 9; ++i) {
-            AGetMainObject()->MRef<uint32_t>(0x170 + 0x18 * i) = 3; // 三路一到九列为泳池
-            AGetMainObject()->MRef<uint32_t>(0x174 + 0x18 * i) = 3; // 四路一到九列为泳池
-        }
-    if (settings.Row34PoolSpawn) {
-        AGetMainObject()->MRef<uint32_t>(0x5E0) = 2; // 三路为水路
-        AGetMainObject()->MRef<uint32_t>(0x5E4) = 2; // 四路为水路
-    }
-    if (settings.SnorkelDolphinSpawn) {
-        *(uint8_t*)0x425733 = AGetMainObject()->Scene(); // 让屋顶可以出海豚和潜水
-        *(uint8_t*)0x425738 = AGetMainObject()->Scene(); // 让屋顶可以出海豚和潜水
+    // if (settings.Row6Plant)
+    //     for (int i = 0; i < 9; ++i)
+    //         AGetMainObject()->MRef<uint32_t>(0x17C + 0x18 * i) = 1; // 六路一到九列为可种
+    // if (settings.Row6Spawn)
+    //     AGetMainObject()->MRef<uint32_t>(0x5EC) = 1; // 六路为陆路
+    // if (settings.SmallPool)
+    //     for (int i = 5; i < 9; ++i) {
+    //         AGetMainObject()->MRef<uint32_t>(0x170 + 0x18 * i) = 3; // 三路六到九列为泳池
+    //         AGetMainObject()->MRef<uint32_t>(0x174 + 0x18 * i) = 3; // 四路六到九列为泳池
+    //     }
+    // if (settings.NormalPool)
+    //     for (int i = 0; i < 9; ++i) {
+    //         AGetMainObject()->MRef<uint32_t>(0x170 + 0x18 * i) = 3; // 三路一到九列为泳池
+    //         AGetMainObject()->MRef<uint32_t>(0x174 + 0x18 * i) = 3; // 四路一到九列为泳池
+    //     }
+    // if (settings.Row34PoolSpawn) {
+    //     AGetMainObject()->MRef<uint32_t>(0x5E0) = 2; // 三路为水路
+    //     AGetMainObject()->MRef<uint32_t>(0x5E4) = 2; // 四路为水路
+    // }
+}
+
+void SpawningRulesModify() {
+
+    // *(std::array<uint8_t, 6>*)0x412DCE = {0x5E, 0x5B, 0x8B, 0xE5, 0x5D, 0xC3}; // 原始函数
+    *(std::array<uint8_t, 6>*)0x412DCE = {0xE9, 0x51, 0xFF, 0xFF, 0xFF, 0x90};
+
+    if (settings.AllowPoolAmbush) {
+        *(std::array<uint8_t, 1>*)0x412DBD = {0xEB};
+    } else if (settings.BanPoolAmbush) {
+        *(std::array<uint8_t, 1>*)0x412DBD = {0x74};
+        *(std::array<uint8_t, 1>*)0x412DBC = {0xFF};
+        *(std::array<uint8_t, 1>*)0x412DC1 = {0xFF};
     } else {
-        *(uint8_t*)0x425733 = 0x02; // 恢复
-        *(uint8_t*)0x425738 = 0x03; // 恢复
+        *(std::array<uint8_t, 1>*)0x412DBD = {0x74};
+        *(std::array<uint8_t, 1>*)0x412DBC = {0x02};
+        *(std::array<uint8_t, 1>*)0x412DC1 = {0x03};
+    }
+
+    if (settings.AllowSkyAmbush) {
+        *(std::array<uint8_t, 1>*)0x412D12 = {0xEB};
+    } else if (settings.BanSkyAmbush) {
+        *(std::array<uint8_t, 1>*)0x412D12 = {0x74};
+        *(std::array<uint8_t, 1>*)0x412D11 = {0xFF};
+        *(std::array<uint8_t, 1>*)0x412D16 = {0xFF};
+    } else {
+        *(std::array<uint8_t, 1>*)0x412D12 = {0x74};
+        *(std::array<uint8_t, 1>*)0x412D11 = {0x04};
+        *(std::array<uint8_t, 1>*)0x412D16 = {0x05};
+    }
+
+    if (settings.AllowZomboni) {
+        *(std::array<uint8_t, 1>*)0x42576E = {0xFF};
+    } else if (settings.BanZomboni) {
+        *(std::array<uint8_t, 1>*)0x42576E = {0x0C};
+        *(std::array<uint8_t, 2>*)0x42576A = {0x90, 0x90};
+    } else {
+        *(std::array<uint8_t, 1>*)0x42576E = {0x0C};
+        *(std::array<uint8_t, 2>*)0x42576A = {0x74, 0x09};
+    }
+
+    if (settings.AllowSnorkel) {
+        *(std::array<uint8_t, 1>*)0x425723 = {0xFF};
+    } else if (settings.BanSnorkel) {
+        *(std::array<uint8_t, 1>*)0x425723 = {0x0B};
+        *(std::array<uint8_t, 2>*)0x425724 = {0x74, 0x2C};
+    } else {
+        *(std::array<uint8_t, 1>*)0x425723 = {0x0B};
+        *(std::array<uint8_t, 2>*)0x425724 = {0x74, 0x05};
+    }
+
+    if (settings.AllowDolphin) {
+        *(std::array<uint8_t, 1>*)0x425728 = {0xFF};
+    } else if (settings.BanDolphin) {
+        *(std::array<uint8_t, 1>*)0x425728 = {0x0E};
+        *(std::array<uint8_t, 2>*)0x42572B = {0xEB, 0x25};
+    } else {
+        *(std::array<uint8_t, 1>*)0x425728 = {0x0E};
+        *(std::array<uint8_t, 2>*)0x42572B = {0x8B, 0x86};
+    }
+
+    if (settings.AllowDancing) {
+        *(std::array<uint8_t, 1>*)0x42575A = {0xFF};
+    } else if (settings.BanDancing) {
+        *(std::array<uint8_t, 1>*)0x42575A = {0x08};
+        *(std::array<uint8_t, 2>*)0x42574D = {0x90, 0x90};
+    } else {
+        *(std::array<uint8_t, 1>*)0x42575A = {0x08};
+        *(std::array<uint8_t, 2>*)0x42574D = {0x75, 0x12};
+    }
+
+    if (settings.AllowDigger) {
+        *(std::array<uint8_t, 1>*)0x425751 = {0xFF};
+    } else if (settings.BanDigger) {
+        *(std::array<uint8_t, 1>*)0x425751 = {0x11};
+        *(std::array<uint8_t, 2>*)0x42574D = {0x90, 0x90};
+    } else {
+        *(std::array<uint8_t, 1>*)0x425751 = {0x11};
+        *(std::array<uint8_t, 2>*)0x42574D = {0x75, 0x12};
+    }
+
+    if (settings.AllowBobsled) {
+        *(std::array<uint8_t, 1>*)0x4257E1 = {0xFF};
+    } else {
+        *(std::array<uint8_t, 1>*)0x4257E1 = {0x0D};
+    }
+
+    if (settings.AllowPeashooterZombie) {
+        *(std::array<uint8_t, 1>*)0x4257F5 = {0xFF};
+    } else {
+        *(std::array<uint8_t, 1>*)0x4257F5 = {0x1A};
+    }
+    if (settings.AllowWallnutZombie) {
+        *(std::array<uint8_t, 1>*)0x4257FA = {0xFF};
+    } else {
+        *(std::array<uint8_t, 1>*)0x4257FA = {0x1B};
+    }
+    if (settings.AllowJalapenoZombie) {
+        *(std::array<uint8_t, 1>*)0x425804 = {0xFF};
+    } else {
+        *(std::array<uint8_t, 1>*)0x425804 = {0x1C};
+    }
+    if (settings.AllowGatlingPeaZombie) {
+        *(std::array<uint8_t, 1>*)0x425809 = {0xFF};
+    } else {
+        *(std::array<uint8_t, 1>*)0x425809 = {0x1D};
+    }
+    if (settings.AllowSquashZombie) {
+        *(std::array<uint8_t, 1>*)0x42580E = {0xFF};
+    } else {
+        *(std::array<uint8_t, 1>*)0x42580E = {0x1E};
+    }
+    if (settings.AllowTallnutZombie) {
+        *(std::array<uint8_t, 1>*)0x4257FF = {0xFF};
+    } else {
+        *(std::array<uint8_t, 1>*)0x4257FF = {0x1F};
     }
 }
 
 void CreateStageModifyGroup(AWindow* window, int LeftEdge, int TopEdge) {
-    // constexpr static int SPACE = 5;
-    // // constexpr static int WIDTH = 100;
-    // constexpr static int HEIGHT = 25;
-    // constexpr static int BTNWIDTH = 75;
+    constexpr static int SPACE = 5;
+    constexpr static int WIDTH = 100;
+    constexpr static int HEIGHT = 25;
+    constexpr static int BTNWIDTH = 75;
 
-    // int y = TopEdge;
-    // int x = LeftEdge;
-    // window->AddLabel("", x, y, 194, (SPACE + HEIGHT) * 12);
+    int y = TopEdge;
+    int x = LeftEdge;
+    window->AddLabel("", x, y, 194, (SPACE + HEIGHT) * 12);
 
-    // x += SPACE;
-    // window->AddLabel("场地魔改", x, y, BTNWIDTH, HEIGHT);
+    x += SPACE;
+    window->AddLabel("场地特性", x, y, WIDTH, HEIGHT);
 
     // y += SPACE + HEIGHT;
     // auto Row6PlantBox = window->AddCheckBox("六路种植", x, y, BTNWIDTH, HEIGHT);
@@ -2779,10 +2926,213 @@ void CreateStageModifyGroup(AWindow* window, int LeftEdge, int TopEdge) {
     // Row34PoolSpawnBox->SetCheck(settings.Row34PoolSpawn);
     // Row34PoolSpawnBox->Connect([=] { settings.Row34PoolSpawn = Row34PoolSpawnBox->GetCheck(); });
 
-    // y += SPACE + HEIGHT;
-    // auto SnorkelDolphinSpawnBox = window->AddCheckBox("自然生成海豚潜水", x, y, 150, HEIGHT);
-    // SnorkelDolphinSpawnBox->SetCheck(settings.SnorkelDolphinSpawn);
-    // SnorkelDolphinSpawnBox->Connect([=] { settings.SnorkelDolphinSpawn = SnorkelDolphinSpawnBox->GetCheck(); });
+    y += SPACE + HEIGHT;
+    auto AllowPoolAmbushBox = window->AddCheckBox("允许珊瑚", x, y, BTNWIDTH, HEIGHT);
+    AllowPoolAmbushBox->SetCheck(settings.AllowPoolAmbush);
+    auto BanPoolAmbushBox = window->AddCheckBox("禁止珊瑚", x + WIDTH, y, BTNWIDTH, HEIGHT);
+    BanPoolAmbushBox->SetCheck(settings.BanPoolAmbush);
+
+    AllowPoolAmbushBox->Connect([=] {
+        settings.AllowPoolAmbush = AllowPoolAmbushBox->GetCheck();
+        if (AllowPoolAmbushBox->GetCheck() && BanPoolAmbushBox->GetCheck()) {
+            settings.BanPoolAmbush = false;
+            BanPoolAmbushBox->SetCheck(false);
+        }
+        SpawningRulesModify();
+    });
+
+    BanPoolAmbushBox->Connect([=] {
+        settings.BanPoolAmbush = BanPoolAmbushBox->GetCheck();
+        if (BanPoolAmbushBox->GetCheck() && AllowPoolAmbushBox->GetCheck()) {
+            settings.AllowPoolAmbush = false;
+            AllowPoolAmbushBox->SetCheck(false);
+        }
+        SpawningRulesModify();
+    });
+
+    y += SPACE + HEIGHT;
+    auto AllowSkyAmbushBox = window->AddCheckBox("允许空降", x, y, BTNWIDTH, HEIGHT);
+    AllowSkyAmbushBox->SetCheck(settings.AllowSkyAmbush);
+    auto BanSkyAmbushBox = window->AddCheckBox("禁止空降", x + WIDTH, y, BTNWIDTH, HEIGHT);
+    BanSkyAmbushBox->SetCheck(settings.BanSkyAmbush);
+
+    AllowSkyAmbushBox->Connect([=] {
+        settings.AllowSkyAmbush = AllowSkyAmbushBox->GetCheck();
+        if (AllowSkyAmbushBox->GetCheck() && BanSkyAmbushBox->GetCheck()) {
+            settings.BanSkyAmbush = false;
+            BanSkyAmbushBox->SetCheck(false);
+        }
+        SpawningRulesModify();
+    });
+
+    BanSkyAmbushBox->Connect([=] {
+        settings.BanSkyAmbush = BanSkyAmbushBox->GetCheck();
+        if (BanSkyAmbushBox->GetCheck() && AllowSkyAmbushBox->GetCheck()) {
+            settings.AllowSkyAmbush = false;
+            AllowSkyAmbushBox->SetCheck(false);
+        }
+        SpawningRulesModify();
+    });
+
+    y += SPACE + HEIGHT;
+    auto AllowZomboniBox = window->AddCheckBox("允许冰车", x, y, BTNWIDTH, HEIGHT);
+    AllowZomboniBox->SetCheck(settings.AllowZomboni);
+    auto BanZomboniBox = window->AddCheckBox("禁止冰车", x + WIDTH, y, BTNWIDTH, HEIGHT);
+    BanZomboniBox->SetCheck(settings.BanZomboni);
+
+    AllowZomboniBox->Connect([=] {
+        settings.AllowZomboni = AllowZomboniBox->GetCheck();
+        if (AllowZomboniBox->GetCheck() && BanZomboniBox->GetCheck()) {
+            settings.BanZomboni = false;
+            BanZomboniBox->SetCheck(false);
+        }
+        SpawningRulesModify();
+    });
+
+    BanZomboniBox->Connect([=] {
+        settings.BanZomboni = BanZomboniBox->GetCheck();
+        if (BanZomboniBox->GetCheck() && AllowZomboniBox->GetCheck()) {
+            settings.AllowZomboni = false;
+            AllowZomboniBox->SetCheck(false);
+        }
+        SpawningRulesModify();
+    });
+
+    y += SPACE + HEIGHT;
+    auto AllowSnorkelBox = window->AddCheckBox("允许潜水", x, y, BTNWIDTH, HEIGHT);
+    AllowSnorkelBox->SetCheck(settings.AllowSnorkel);
+    auto BanSnorkelBox = window->AddCheckBox("禁止潜水", x + WIDTH, y, BTNWIDTH, HEIGHT);
+    BanSnorkelBox->SetCheck(settings.BanSnorkel);
+
+    AllowSnorkelBox->Connect([=] {
+        settings.AllowSnorkel = AllowSnorkelBox->GetCheck();
+        if (AllowSnorkelBox->GetCheck() && BanSnorkelBox->GetCheck()) {
+            settings.BanSnorkel = false;
+            BanSnorkelBox->SetCheck(false);
+        }
+        SpawningRulesModify();
+    });
+
+    BanSnorkelBox->Connect([=] {
+        settings.BanSnorkel = BanSnorkelBox->GetCheck();
+        if (BanSnorkelBox->GetCheck() && AllowSnorkelBox->GetCheck()) {
+            settings.AllowSnorkel = false;
+            AllowSnorkelBox->SetCheck(false);
+        }
+        SpawningRulesModify();
+    });
+
+    y += SPACE + HEIGHT;
+    auto AllowDolphinBox = window->AddCheckBox("允许海豚", x, y, BTNWIDTH, HEIGHT);
+    AllowDolphinBox->SetCheck(settings.AllowDolphin);
+    auto BanDolphinBox = window->AddCheckBox("禁止海豚", x + WIDTH, y, BTNWIDTH, HEIGHT);
+    BanDolphinBox->SetCheck(settings.BanDolphin);
+
+    AllowDolphinBox->Connect([=] {
+        settings.AllowDolphin = AllowDolphinBox->GetCheck();
+        if (AllowDolphinBox->GetCheck() && BanDolphinBox->GetCheck()) {
+            settings.BanDolphin = false;
+            BanDolphinBox->SetCheck(false);
+        }
+        SpawningRulesModify();
+    });
+
+    BanDolphinBox->Connect([=] {
+        settings.BanDolphin = BanDolphinBox->GetCheck();
+        if (BanDolphinBox->GetCheck() && AllowDolphinBox->GetCheck()) {
+            settings.AllowDolphin = false;
+            AllowDolphinBox->SetCheck(false);
+        }
+        SpawningRulesModify();
+    });
+
+    y += SPACE + HEIGHT;
+    auto AllowDancingBox = window->AddCheckBox("允许舞王", x, y, BTNWIDTH, HEIGHT);
+    AllowDancingBox->SetCheck(settings.AllowDancing);
+    auto BanDancingBox = window->AddCheckBox("禁止舞王", x + WIDTH, y, BTNWIDTH, HEIGHT);
+    BanDancingBox->SetCheck(settings.BanDancing);
+
+    AllowDancingBox->Connect([=] {
+        settings.AllowDancing = AllowDancingBox->GetCheck();
+        if (AllowDancingBox->GetCheck() && BanDancingBox->GetCheck()) {
+            settings.BanDancing = false;
+            BanDancingBox->SetCheck(false);
+        }
+        SpawningRulesModify();
+    });
+
+    BanDancingBox->Connect([=] {
+        settings.BanDancing = BanDancingBox->GetCheck();
+        if (BanDancingBox->GetCheck() && AllowDancingBox->GetCheck()) {
+            settings.AllowDancing = false;
+            AllowDancingBox->SetCheck(false);
+        }
+        SpawningRulesModify();
+    });
+
+    y += SPACE + HEIGHT;
+    auto AllowDiggerBox = window->AddCheckBox("允许矿工", x, y, BTNWIDTH, HEIGHT);
+    AllowDiggerBox->SetCheck(settings.AllowDigger);
+    auto BanDiggerBox = window->AddCheckBox("禁止矿工", x + WIDTH, y, BTNWIDTH, HEIGHT);
+    BanDiggerBox->SetCheck(settings.BanDigger);
+
+    AllowDiggerBox->Connect([=] {
+        settings.AllowDigger = AllowDiggerBox->GetCheck();
+        if (AllowDiggerBox->GetCheck() && BanDiggerBox->GetCheck()) {
+            settings.BanDigger = false;
+            BanDiggerBox->SetCheck(false);
+        }
+        SpawningRulesModify();
+    });
+
+    BanDiggerBox->Connect([=] {
+        settings.BanDigger = BanDiggerBox->GetCheck();
+        if (BanDiggerBox->GetCheck() && AllowDiggerBox->GetCheck()) {
+            settings.AllowDigger = false;
+            AllowDiggerBox->SetCheck(false);
+        }
+        SpawningRulesModify();
+    });
+
+    y += SPACE + HEIGHT;
+    auto AllowBobsledBox = window->AddCheckBox("允许雪橇", x, y, BTNWIDTH, HEIGHT);
+    AllowBobsledBox->SetCheck(settings.AllowBobsled);
+    AllowBobsledBox->Connect([=] { settings.AllowBobsled = AllowBobsledBox->GetCheck(); SpawningRulesModify(); });
+
+    int TempY = y;
+
+    y += SPACE + HEIGHT;
+    auto AllowPeashooterZombieBox = window->AddCheckBox("允许豌豆", x, y, BTNWIDTH, HEIGHT);
+    AllowPeashooterZombieBox->SetCheck(settings.AllowPeashooterZombie);
+    AllowPeashooterZombieBox->Connect([=] { settings.AllowPeashooterZombie = AllowPeashooterZombieBox->GetCheck(); SpawningRulesModify(); });
+
+    y += SPACE + HEIGHT;
+    auto AllowWallnutZombieBox = window->AddCheckBox("允许坚果", x, y, BTNWIDTH, HEIGHT);
+    AllowWallnutZombieBox->SetCheck(settings.AllowWallnutZombie);
+    AllowWallnutZombieBox->Connect([=] { settings.AllowWallnutZombie = AllowWallnutZombieBox->GetCheck(); SpawningRulesModify(); });
+
+    y += SPACE + HEIGHT;
+    auto AllowJalapenoZombieBox = window->AddCheckBox("允许辣椒", x, y, BTNWIDTH, HEIGHT);
+    AllowJalapenoZombieBox->SetCheck(settings.AllowJalapenoZombie);
+    AllowJalapenoZombieBox->Connect([=] { settings.AllowJalapenoZombie = AllowJalapenoZombieBox->GetCheck(); SpawningRulesModify(); });
+
+    y = TempY;
+    x += WIDTH;
+
+    y += SPACE + HEIGHT;
+    auto AllowGatlingPeaZombieBox = window->AddCheckBox("允许机枪", x, y, BTNWIDTH, HEIGHT);
+    AllowGatlingPeaZombieBox->SetCheck(settings.AllowGatlingPeaZombie);
+    AllowGatlingPeaZombieBox->Connect([=] { settings.AllowGatlingPeaZombie = AllowGatlingPeaZombieBox->GetCheck(); SpawningRulesModify(); });
+
+    y += SPACE + HEIGHT;
+    auto AllowSquashZombieBox = window->AddCheckBox("允许倭瓜", x, y, BTNWIDTH, HEIGHT);
+    AllowSquashZombieBox->SetCheck(settings.AllowSquashZombie);
+    AllowSquashZombieBox->Connect([=] { settings.AllowSquashZombie = AllowSquashZombieBox->GetCheck(); SpawningRulesModify(); });
+
+    y += SPACE + HEIGHT;
+    auto AllowTallnutZombieBox = window->AddCheckBox("允许高坚", x, y, BTNWIDTH, HEIGHT);
+    AllowTallnutZombieBox->SetCheck(settings.AllowTallnutZombie);
+    AllowTallnutZombieBox->Connect([=] { settings.AllowTallnutZombie = AllowTallnutZombieBox->GetCheck(); SpawningRulesModify(); });
 }
 
 AWindow* OtherPageWindow(int pageX, int pageY) {
@@ -2796,6 +3146,32 @@ AWindow* OtherPageWindow(int pageX, int pageY) {
     int x = SPACE;
     int y = 0;
 
+    auto Row6Btn = window->AddPushButton("R6E模式", x, y, 100, 25);
+    Row6Btn->Connect([=] {
+        for (int i = 0; i < 9; ++i)
+            AGetMainObject()->MRef<uint32_t>(0x17C + 0x18 * i) = 1; // 六路一到九列为可种
+        AGetMainObject()->MRef<uint32_t>(0x5EC) = 1;                // 六路为陆路
+        for (int i = 5; i < 9; ++i) {
+            AGetMainObject()->MRef<uint32_t>(0x170 + 0x18 * i) = 1; // 三路六到九列为泳池
+            AGetMainObject()->MRef<uint32_t>(0x174 + 0x18 * i) = 1; // 四路六到九列为泳池
+        }
+        AGetMainObject()->MRef<uint32_t>(0x5E0) = 1; // 三路为水路
+        AGetMainObject()->MRef<uint32_t>(0x5E4) = 1; // 四路为水路
+    });
+    x += 100;
+    auto RoofPoolBtn = window->AddPushButton("RPE模式", x, y, 100, 25);
+    RoofPoolBtn->Connect([=] {
+        for (int i = 0; i < 9; ++i)
+            AGetMainObject()->MRef<uint32_t>(0x17C + 0x18 * i) = 1; // 六路一到九列为可种
+        AGetMainObject()->MRef<uint32_t>(0x5EC) = 1;                // 六路为陆路
+        for (int i = 5; i < 9; ++i) {
+            AGetMainObject()->MRef<uint32_t>(0x170 + 0x18 * i) = 3; // 三路六到九列为泳池
+            AGetMainObject()->MRef<uint32_t>(0x174 + 0x18 * i) = 3; // 四路六到九列为泳池
+        }
+        AGetMainObject()->MRef<uint32_t>(0x5E0) = 2; // 三路为水路
+        AGetMainObject()->MRef<uint32_t>(0x5E4) = 2; // 四路为水路
+    });
+    x -= 100;
     CreateStageModifyGroup(window, x + WIDTH * 4 + SPACE * 6, y);
 
     return window;
@@ -2840,7 +3216,7 @@ AOnAfterInject({
     x += TOPWIDTH;
     auto spawnPageBtn = mainWindow.AddPushButton("出怪设置", x, 0, TOPWIDTH, TOPHEIGHT);
     x += TOPWIDTH;
-    auto otherPageBtn = mainWindow.AddPushButton("其他功能", x, 0, TOPWIDTH, TOPHEIGHT);
+    auto otherPageBtn = mainWindow.AddPushButton("场地设置", x, 0, TOPWIDTH, TOPHEIGHT);
     mainWindow.AddPushButton("", 0, TOPHEIGHT, 635, 5);
 
     auto basicPage = BasicPageWindow(0, TOPHEIGHT + SPACE);
@@ -2915,8 +3291,8 @@ AOnEnterFight({
         AAverageSpawn();
     aReplay.SetMaxSaveCnt(INT_MAX);
     aReplay.SetShowInfo(false);
+    // SpawningRulesModify();
     zombieListInfo_update();
-    // StageModify();
     if (settings.AutoRecordOnGameStart && AMRef<int>(0x6A9EC0, 0x7F8) != AAsm::CHALLENGE_ICE) {
         compressor->SetFilePath(settings.savePath + std::string("/") + GetCurTimeStr() + ".7z");
         aReplay.StartRecord(std::round(settings.recordTickInterval));
