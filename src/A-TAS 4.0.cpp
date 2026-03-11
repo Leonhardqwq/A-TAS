@@ -3,7 +3,7 @@
 // 本辅助工具目前版本使用的键控注入框架应使用AvZ2 2.8.5 20250711版本，源码不保证对更旧版本AvZ的兼容性
 
 #define UNICODE
-#define A_TAS_VERSION 202601281520
+#define A_TAS_VERSION 202602040250
 #include "AsmFunc.h"
 #include "Draw.h"
 #include "asm_insert_code/asm_insert_code.h"
@@ -926,11 +926,11 @@ void BalloonPause() {
 
 // 真实倒计时
 int RealCountdown() {
-    if (AGetMainObject()->Wave() == 20)
+    if (AGetMainObject()->Wave() == AGetMainObject()->TotalWave())
         return AGetMainObject()->LevelEndCountdown();
     if (AGetMainObject()->RefreshCountdown() > 200)
         return 0;
-    if (AGetMainObject()->Wave() == 9 || AGetMainObject()->Wave() == 19) {
+    if (ARangeIn(AGetMainObject()->Wave(), {9, 19, 29, 39})) {
         if (AGetMainObject()->RefreshCountdown() <= 5)
             return AGetMainObject()->HugeWaveCountdown();
         return AGetMainObject()->RefreshCountdown() + 745;
@@ -941,6 +941,7 @@ int RealCountdown() {
 // 显示信息，-1 = 关闭，0 = 基础，1 = 进阶
 // 这段逻辑最后更改的时间为20250313，确保血条覆盖顺序
 static int ShowInfoState = -1;
+std::vector<int> WaveClock(40, 0);
 void DrawInfo() {
     if (AGetMainObject() == nullptr)
         return; // 防崩溃代码
@@ -1118,31 +1119,44 @@ void DrawInfo() {
         if (ShowInfoState)
             GigaNumPainter.Draw(AText(std::format("All{:3}", GigaCumulativeDistribution[20 - 1]), 22, 38), 0xFFFFFFFF);
     }
+
     // 本波总血条
+    if (RealCountdown())
+        WaveClock[AGetMainObject()->Wave()] = AGetMainObject()->GameClock() + RealCountdown();
     if (settings.TotalHP) {
-        if (AGetMainObject()->Wave() < 1)
+        if (AGetMainObject()->Wave() == 0)
             barPainter.Draw(ABar(58, 574, 1, 0, {}, 1, ABar::RIGHT, 127, 24, settings.TotalHPARGB1, 0xC0FFFFFF));
-        else if (ARangeIn(AGetMainObject()->Wave(), {9, 19, 20}) || ShowInfoState)
+        else if (ARangeIn(AGetMainObject()->Wave(), {9, 19, 29, 39, AGetMainObject()->TotalWave()}) || ShowInfoState)
             barPainter.Draw(ABar(58, 574, AGetMainObject()->MRef<int>(0x5598), AAsm::ZombieTotalHp(ANowWave() - 1), {AGetMainObject()->ZombieRefreshHp()}, 1, ABar::RIGHT, 127, 24, RealCountdown() ? settings.TotalHPARGB2 : settings.TotalHPARGB1, 0xC0FFFFFF));
         else
             barPainter.Draw(ABar(58, 574, AGetMainObject()->MRef<int>(0x5598), AAsm::ZombieTotalHp(ANowWave() - 1), {AGetMainObject()->MRef<int>(0x5598) * 13 / 20, AGetMainObject()->MRef<int>(0x5598) / 2}, 1, ABar::RIGHT, 127, 24, settings.TotalHPARGB1, 0xC0FFFFFF));
         // 波数时间
         fightInfoPainter.Draw(AText(std::format("{:02},", AGetMainObject()->Wave() ?: 1), 59, 575), 0xFF0000FF);
-        fightInfoPainter.Draw(AText(std::format("{}", ANowTime(ANowWave()) == -2147483648 ? (AGetMainObject()->CompletedRounds() ? -600 : -1800) : ANowTime(ANowWave())), 82, 575), 0xFF0000FF);
+        if (AGetMainObject()->Wave() == 0)
+            fightInfoPainter.Draw(AText(std::format("{}", -AGetMainObject()->RefreshCountdown()), 82, 575), 0xFF0000FF);
+        else if (WaveClock[AGetMainObject()->Wave() - 1] == 0)
+            fightInfoPainter.Draw(AText(std::format("{}", ANowTime(ANowWave())), 82, 575), 0xFF0000FF);
+        else
+            fightInfoPainter.Draw(AText(std::format("{}", AGetMainObject()->GameClock() - WaveClock[AGetMainObject()->Wave() - 1]), 82, 575), 0xFF0000FF);
         fightInfoPainter.Draw(AText(RealCountdown() && (ARangeIn(AGetMainObject()->Wave(), {9, 19, 20}) || ShowInfoState) ? std::format("{}", -RealCountdown()) : "", 145, 575), 0xFFFF0000);
     }
+
     // 波长记录
     for (int i = 0; i < settings.WavelengthRecord; ++i) {
-        if (AGetMainObject()->Wave() - i > 0 && ANowTime(ANowWave() - i) > 0 && RealCountdown() && (ARangeIn(AGetMainObject()->Wave(), {9, 19, 20}) || ShowInfoState)) {
+        if (AGetMainObject()->Wave() - i > 0 && WaveClock[AGetMainObject()->Wave() - i] > 0 && RealCountdown() && (ARangeIn(AGetMainObject()->Wave(), {9, 19, 29, 39, AGetMainObject()->TotalWave()}) || ShowInfoState)) {
             barPainter.Draw(ABar(191 + 71 * i, 574, 1, 0, {}, 1, ABar::RIGHT, 65, 24, 0xFFFFC000, 0xC0FFFFFF));
             fightInfoPainter.Draw(AText(std::format("{:02},", AGetMainObject()->Wave() - i ?: 1), 193 + 71 * i, 575), 0xFF0000FF);
-            fightInfoPainter.Draw(AText(std::format("{}", i ? ANowTime(ANowWave() - i) - ANowTime(ANowWave() + 1 - i) : ANowTime(ANowWave()) + RealCountdown()), 216 + 71 * i, 575), 0xFF0000FF);
-        } else if (AGetMainObject()->Wave() - i > 1 && ANowTime(ANowWave() - 1 - i) > 0) {
+            fightInfoPainter.Draw(AText(std::format("{}", WaveClock[AGetMainObject()->Wave() - i] - WaveClock[AGetMainObject()->Wave() - 1 - i]), 216 + 71 * i, 575), 0xFF0000FF);
+        } else if (AGetMainObject()->Wave() - 1 - i > 0 && WaveClock[AGetMainObject()->Wave() - 1 - i] > 0) {
             barPainter.Draw(ABar(191 + 71 * i, 574, 1, 0, {}, 1, ABar::RIGHT, 65, 24, 0xFFFFC000, 0xC0FFFFFF));
-            fightInfoPainter.Draw(AText(std::format("{:02},", AGetMainObject()->Wave() - 1 - i ?: 1), 193 + 71 * i, 575), 0xFF0000FF);
-            fightInfoPainter.Draw(AText(std::format("{}", ANowTime(ANowWave() - 1 - i) - ANowTime(ANowWave() - i)), 216 + 71 * i, 575), 0xFF0000FF);
+            fightInfoPainter.Draw(AText(std::format("{:02},", AGetMainObject()->Wave() - i - 1 ?: 1), 193 + 71 * i, 575), 0xFF0000FF);
+            if (WaveClock[AGetMainObject()->Wave() - 2 - i] > 0)
+                fightInfoPainter.Draw(AText(std::format("{}", WaveClock[AGetMainObject()->Wave() - 1 - i] - WaveClock[AGetMainObject()->Wave() - 2 - i]), 216 + 71 * i, 575), 0xFF0000FF);
+            else
+                fightInfoPainter.Draw(AText(std::format("{}", ANowTime(ANowWave() - 1 - i) - ANowTime(ANowWave() - i)), 216 + 71 * i, 575), 0xFF0000FF);
         }
     }
+
     // 显示倍速
     if (AGetPvzBase()->TickMs() != 10 && settings.ShowSpeed) {
         barPainter.Draw(ABar(6, 574, 1, 1, {}, 1, ABar::RIGHT, 46, 24, AGetPvzBase()->TickMs() > 10 ? settings.ShowSpeedARGB1 : settings.ShowSpeedARGB2));
@@ -2035,7 +2049,7 @@ static uint32_t HexToUL(const std::string& text, uint32_t originalVal) {
 
 void CreateShowInfoGroup(AWindow* window, int LeftEdge, int TopEdge) {
     constexpr static int SPACE = 5;
-    constexpr static int WIDTH = 100;
+    // constexpr static int WIDTH = 100;
     constexpr static int HEIGHT = 25;
     constexpr static int BTNWIDTH = 90;
     constexpr static int EDITWIDTH = 100;
