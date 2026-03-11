@@ -1,9 +1,9 @@
 // A-TAS 4.0 by mint/残云/碧水/正弦
 // 技术指导：Leonhard/铃仙/向量/零度
-// 本辅助工具目前版本使用的键控注入框架应使用AvZ2 20250225版本，源码不保证对更旧版本AvZ的兼容性
+// 本辅助工具目前版本使用的键控注入框架应使用AvZ2 2.8.4 20250515版本，源码不保证对更旧版本AvZ的兼容性
 
 #define UNICODE
-#define A_TAS_VERSION 202504262322
+#define A_TAS_VERSION 202505220015
 #include "AsmFunc.h"
 #include "Draw.h"
 #include "dsl.h"
@@ -632,7 +632,7 @@ void SmartRemove() {
                         Plant.MRef<int>(0xB8) = 60;
                         UpdateReanimColor(index);
                     } // 若本格有南瓜且右格植物同时相对于南瓜和偏右植物高栈，脚本预估偏右植物是危险的
-                } // 将僵尸啃食植物的闪光倒计时设为游戏不会自然产生的60。光效此时近似铲子预瞄植物，且覆盖僵尸啃食植物的闪光
+                }     // 将僵尸啃食植物的闪光倒计时设为游戏不会自然产生的60。光效此时近似铲子预瞄植物，且覆盖僵尸啃食植物的闪光
             }
             for (ZomboniInfo each : Zomboni) {
                 if (!remove_cancel && each.row == row && isRangeOverlap(APlantType(Plant.Type()), AZOMBONI, Plant.Abscissa(), int(each.x)) && !isRangeOverlap(AFLOWER_POT, AZOMBONI, Grid(row, col)[0]->Abscissa(), int(each.x))) {
@@ -655,7 +655,12 @@ void SmartRemove() {
 }
 
 // 检查卡片是否能用或是被拿着
-bool isSeedUsableOrHolding(APlantType Type) { return AIsSeedUsable(Type) || AMRef<int>(0x6A9EC0, 0x768, 0x138, 0x28) == Type; }
+bool isSeedUsableOrHolding(APlantType Type) {
+    if (Type >= 49) {
+        return AIsSeedUsable(Type) || AGetMainObject()->MouseAttribution()->MRef<int>(0x2C) == Type - 49;
+    } else
+        return AIsSeedUsable(Type) || AGetMainObject()->MouseAttribution()->MRef<int>(0x28) == Type;
+}
 
 // 获取Type类型植物对小丑爆炸的判定范围
 std::pair<int, int> GetExplodeRange(APlantType Type) {
@@ -740,7 +745,7 @@ bool PredictExplode(AZombie* Zombie, int PlantRow, int PlantCol, APlantType Plan
 // 拖延至不会被小丑炸的情况下再用卡，需存活时间NeedTime应填写≥1的数，默认卡片需存活至99cs后
 // 若检测到在天台车底自动补充花盆式放置植物，则在小丑倒计时不为1的时候直接种植，以此兼容车底炸
 void SafeCard(APlantType PlantType, int Row, int Col, int NeedTime = 99) {
-    if (AGetCardIndex(PlantType) < 0 || AGetCardIndex(PlantType) > 9 || !isSeedUsableOrHolding(PlantType))
+    if (!isSeedUsableOrHolding(PlantType))
         return; // 卡片需要带了且CD是好的
     bool RoofUnderCarsExplode = false;
     if (AAsm::GetPlantRejectType(ACHERRY_BOMB, Row - 1, Col - 1) == AAsm::NEEDS_POT) { // 如果是天台自动补充花盆的情境，先查冰车/投篮
@@ -775,18 +780,31 @@ void SafeCard(APlantType PlantType, int Row, int Col, int NeedTime = 99) {
 // 默认樱桃、辣椒、夜间黑核、夜间蓝冰需存活至99cs后，其他植物需存活至1cs后
 // 可同时作为天台车底炸快捷键，满足天台车底炸且当帧小丑倒计时不为1时会认为灰烬是安全的
 void SmartAsh() {
-    int PlantType = AMRef<int>(0x6A9EC0, 0x768, 0x138, 0x28); // 捏着的卡的类型
+    int MousePlant = AGetMainObject()->MouseAttribution()->MRef<int>(0x28);
+    int MouseMPlant = AGetMainObject()->MouseAttribution()->MRef<int>(0x2C);
     if (!isMouseInField())
-        return;           // 鼠标需在场内，避免鼠标行/鼠标列在场外调用时溢出
-    AAsm::ReleaseMouse(); // 松开鼠标
+        return; // 鼠标需在场内，避免鼠标行/鼠标列在场外调用时溢出
     int Row = int(AMouseRow() + 0.5);
     int Col = int(AMouseCol() + 0.5); // 鼠标所在格
     if (Col > 9)                      // 兼容宽屏拓展
         Col = 9;
-    if (ARangeIn(PlantType, {ACHERRY_BOMB, AJALAPENO}) || (aFieldInfo.isNight && ARangeIn(PlantType, {ADOOM_SHROOM, AICE_SHROOM})))
-        SafeCard(APlantType(PlantType), Row, Col, 99);
-    else
-        SafeCard(APlantType(PlantType), Row, Col, 1);
+    if (MousePlant == AIMITATOR) {
+        if (!isSeedUsableOrHolding(ALILY_PAD) && AAsm::GetPlantRejectType(MouseMPlant, Row - 1, Col - 1) == AAsm::NOT_ON_WATER)
+            return;
+        if (!isSeedUsableOrHolding(AFLOWER_POT) && AAsm::GetPlantRejectType(MouseMPlant, Row - 1, Col - 1) == AAsm::NEEDS_POT)
+            return;
+        SafeCard(APlantType(MouseMPlant + 49), Row, Col, 1);
+    } else {
+        if (!isSeedUsableOrHolding(ALILY_PAD) && AAsm::GetPlantRejectType(MousePlant, Row - 1, Col - 1) == AAsm::NOT_ON_WATER)
+            return;
+        if (!isSeedUsableOrHolding(AFLOWER_POT) && AAsm::GetPlantRejectType(MousePlant, Row - 1, Col - 1) == AAsm::NEEDS_POT)
+            return;
+        if (ARangeIn(MousePlant, {ACHERRY_BOMB, AJALAPENO}) || (aFieldInfo.isNight && ARangeIn(MousePlant, {ADOOM_SHROOM, AICE_SHROOM})))
+            SafeCard(APlantType(MousePlant), Row, Col, 99);
+        else
+            SafeCard(APlantType(MousePlant), Row, Col, 1);
+    }
+    AAsm::ReleaseMouse();
 }
 
 // 小丑暂停
@@ -1689,7 +1707,7 @@ void CreateReplayGroup(AWindow* window, int LeftEdge, int TopEdge) {
     savePathBtn->Connect([=] {
         auto path = savePathEdit->GetText();
         __CheckASCII(path, Warning("您设置的保存路径: [" + path + "] 中含有非 ASCII 字符, 请将其设置为纯英文路径再次尝试");
-            savePathEdit->SetText(settings.savePath), );
+                     savePathEdit->SetText(settings.savePath), );
         if (!std::filesystem::exists(path)) {
             Warning("设置的路径: [" + path + "] 不存在");
             savePathEdit->SetText(settings.savePath);
@@ -1958,7 +1976,7 @@ AWindow* KeyPageWindow(int pageX, int pageY) {
 
     // 全部绑定
     auto keybindBtn = window->AddPushButton("全部绑定", x, y, 100, HEIGHT);
-    keybindBtn->Connect([=] mutable {
+    keybindBtn->Connect([=]() mutable {
         for (size_t i = 0; i < keyHandles.size(); ++i)
             keyBindings[i] = keyEdits[i]->GetText();
         for (size_t i = 0; i < keyHandles.size(); ++i)
@@ -1972,7 +1990,7 @@ AWindow* KeyPageWindow(int pageX, int pageY) {
 
     // 清除绑定
     auto clearBtn = window->AddPushButton("清除绑定", x, y, 100, HEIGHT);
-    clearBtn->Connect([=] mutable {
+    clearBtn->Connect([=]() mutable {
         for (size_t i = 0; i < keyHandles.size(); ++i)
             keyBindings[i] = "";
         for (size_t i = 0; i < keyHandles.size(); ++i)
@@ -1986,7 +2004,7 @@ AWindow* KeyPageWindow(int pageX, int pageY) {
 
     // 按键初始化
     auto resetBtn = window->AddPushButton("按键初始化", x, y, 100, HEIGHT);
-    resetBtn->Connect([=] mutable {
+    resetBtn->Connect([=]() mutable {
         for (size_t i = 0; i < keyHandles.size(); ++i)
             keyBindings[i] = keyDefaults[i];
         for (size_t i = 0; i < keyHandles.size(); ++i)
@@ -2222,8 +2240,8 @@ AWindow* SpawnPageWindow(int pageX, int pageY) {
 
 AOnAfterInject({
     __CheckASCII(GetToolPath(),
-        AMsgBox::Show("本工具只能在纯英文路径下才能正常运行, 你放置的路径: [" + GetToolPath() + "] 中含有非 ASCII 字符, 请将本工具的所有文件放置在纯英文路径下再次尝试运行");
-        ATerminate(), );
+                 AMsgBox::Show("本工具只能在纯英文路径下才能正常运行, 你放置的路径: [" + GetToolPath() + "] 中含有非 ASCII 字符, 请将本工具的所有文件放置在纯英文路径下再次尝试运行");
+                 ATerminate(), );
     isInitSuccess = true;
     strcpy(settings.SpeedGears, SpeedGearsDefault.c_str());
     strcpy(settings.savePath, GetToolPath().c_str());
