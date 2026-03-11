@@ -1,10 +1,9 @@
 // A-TAS 4.0 by mint/残云/碧水/正弦
 // 技术指导：Leonhard/铃仙/向量/零度
-// 本辅助工具目前版本使用的键控注入框架应使用AvZ2 2.8.5 20250711版本，源码不保证对更旧版本AvZ的兼容性
+// 本辅助工具目前版本使用的键控注入框架应使用AvZ2 2.9.0 20260224版本，源码不保证对更旧版本AvZ的兼容性
 
-#include <climits>
 #define UNICODE
-#define A_TAS_VERSION 202602212230
+#define A_TAS_VERSION 202603050122
 #include "AsmFunc.h"
 #include "Draw.h"
 #include "asm_insert_code/asm_insert_code.h"
@@ -70,6 +69,9 @@ struct {
     int recordTickInterval = 10;
     int tickRewindCount = 1;
     char savePath[256];
+
+    // Special
+    bool EnterHousePause = true;
 
     // Display
     bool ShowMe = true;
@@ -1875,40 +1877,40 @@ constexpr static int MAIN_HEIGHT = 480;
 
 AMainWindow mainWindow(std::format("A-TAS 4.0 {}", A_TAS_VERSION), MAIN_WIDTH, MAIN_HEIGHT);
 
-// 回放函数
-struct {
-    AOperation startPlayOp = [] {
-    };
-    AOperation startRecordOp = [] {
-    };
-    AOperation pauseOp = [] {
-    };
-    AOperation stopOp = [] {
-        aReplay.Stop();
-    };
-    AOperation nextTickOp = [] {
-        FightUiCheck();
-        if (aReplay.GetState() == aReplay.RECORDING) {
-            ASetAdvancedPause(true);
-        }
-        aReplay.Pause();
-        if (aReplay.GetState() == AReplay::PLAYING) {
-            aReplay.ShowOneTick(aReplay.GetPlayIdx() + 1);
-        }
-    };
-    AOperation preTickOp = [] {
-        FightUiCheck();
-        if (aReplay.GetState() == aReplay.RECORDING) {
-            ASetAdvancedPause(true);
-        }
-        aReplay.Pause();
-        if (aReplay.GetState() == AReplay::RECORDING) {
-            aReplay.ShowOneTick(aReplay.GetRecordIdx() - 1);
-        } else {
-            aReplay.ShowOneTick(aReplay.GetPlayIdx() - 1);
-        }
-    };
-} replayOp;
+// // 回放函数
+// struct {
+//     AOperation startPlayOp = [] {
+//     };
+//     AOperation startRecordOp = [] {
+//     };
+//     AOperation pauseOp = [] {
+//     };
+//     AOperation stopOp = [] {
+//         aReplay.Stop();
+//     };
+//     AOperation nextTickOp = [] {
+//         FightUiCheck();
+//         if (aReplay.GetState() == aReplay.RECORDING) {
+//             ASetAdvancedPause(true);
+//         }
+//         aReplay.Pause();
+//         if (aReplay.GetState() == AReplay::PLAYING) {
+//             aReplay.ShowOneTick(aReplay.GetPlayIdx() + 1);
+//         }
+//     };
+//     AOperation preTickOp = [] {
+//         FightUiCheck();
+//         if (aReplay.GetState() == aReplay.RECORDING) {
+//             ASetAdvancedPause(true);
+//         }
+//         aReplay.Pause();
+//         if (aReplay.GetState() == AReplay::RECORDING) {
+//             aReplay.ShowOneTick(aReplay.GetRecordIdx() - 1);
+//         } else {
+//             aReplay.ShowOneTick(aReplay.GetPlayIdx() - 1);
+//         }
+//     };
+// } replayOp;
 
 void CreateReplayGroup(AWindow* window, int LeftEdge, int TopEdge) {
     constexpr static int SPACE = 5;
@@ -2064,7 +2066,7 @@ void CreateReplayGroup(AWindow* window, int LeftEdge, int TopEdge) {
             Warning("回放正在工作，无法设置精度");
             return;
         };
-        auto tickInterval = stoi(tickIntervalEdit->GetText());
+        auto tickInterval = std::stoi(tickIntervalEdit->GetText());
         if (tickInterval < 1) {
             Warning("精度最小为 1 帧");
             tickInterval = 1;
@@ -2084,7 +2086,7 @@ void CreateReplayGroup(AWindow* window, int LeftEdge, int TopEdge) {
     x += SPACE + WIDTH;
     auto tickRewindCountBtn = window->AddPushButton("设置", x, y, WIDTH, HEIGHT);
     tickRewindCountBtn->Connect([=] {
-        auto tickRewindCount = stoi(tickRewindCountEdit->GetText());
+        auto tickRewindCount = std::stoi(tickRewindCountEdit->GetText());
         if (tickRewindCount < 1) {
             Warning("个数最小为 1 个");
             tickRewindCount = 1;
@@ -2116,6 +2118,31 @@ void CreateReplayGroup(AWindow* window, int LeftEdge, int TopEdge) {
             Info("设置路径: [" + path + "] 成功");
         }
     });
+}
+
+void CreateSpecialGroup(AWindow* window, int LeftEdge, int TopEdge) {
+    constexpr static int SPACE = 5;
+    constexpr static int WIDTH = 100;
+    constexpr static int HEIGHT = 25;
+
+    int y = TopEdge;
+    int x = LeftEdge;
+    window->AddLabel("", x, y, 4 * (SPACE + WIDTH) + SPACE, (SPACE + HEIGHT) * 2);
+
+    x += SPACE;
+    window->AddLabel("特殊功能", x, y, WIDTH * 2 + SPACE, HEIGHT);
+
+    x += SPACE + WIDTH;
+    auto EnterHousePauseBox = window->AddCheckBox("进家时暂停", x, y, WIDTH, HEIGHT);
+    EnterHousePauseBox->SetCheck(settings.EnterHousePause);
+    EnterHousePauseBox->Connect([=] {
+        settings.EnterHousePause = EnterHousePauseBox->GetCheck();
+    });
+    x += SPACE + WIDTH;
+
+    // 下一行
+    y += SPACE + HEIGHT;
+    x = LeftEdge;
 }
 
 static uint32_t HexToUL(const std::string& text, uint32_t originalVal) {
@@ -2426,6 +2453,11 @@ AWindow* BasicPageWindow(int pageX, int pageY) {
     x = SPACE;
     y += SPACE + HEIGHT;
     CreateReplayGroup(window, x, y);
+
+    y += 7 * (SPACE + HEIGHT);
+    y += SPACE;
+
+    CreateSpecialGroup(window, x, y);
 
     return window;
 }
@@ -2748,31 +2780,7 @@ AWindow* SpawnPageWindow(int pageX, int pageY) {
     return window;
 }
 
-// 场地魔改
-void StageModify() {
-    // if (settings.Row6Plant)
-    //     for (int i = 0; i < 9; ++i)
-    //         AGetMainObject()->MRef<uint32_t>(0x17C + 0x18 * i) = 1; // 六路一到九列为可种
-    // if (settings.Row6Spawn)
-    //     AGetMainObject()->MRef<uint32_t>(0x5EC) = 1; // 六路为陆路
-    // if (settings.SmallPool)
-    //     for (int i = 5; i < 9; ++i) {
-    //         AGetMainObject()->MRef<uint32_t>(0x170 + 0x18 * i) = 3; // 三路六到九列为泳池
-    //         AGetMainObject()->MRef<uint32_t>(0x174 + 0x18 * i) = 3; // 四路六到九列为泳池
-    //     }
-    // if (settings.NormalPool)
-    //     for (int i = 0; i < 9; ++i) {
-    //         AGetMainObject()->MRef<uint32_t>(0x170 + 0x18 * i) = 3; // 三路一到九列为泳池
-    //         AGetMainObject()->MRef<uint32_t>(0x174 + 0x18 * i) = 3; // 四路一到九列为泳池
-    //     }
-    // if (settings.Row34PoolSpawn) {
-    //     AGetMainObject()->MRef<uint32_t>(0x5E0) = 2; // 三路为水路
-    //     AGetMainObject()->MRef<uint32_t>(0x5E4) = 2; // 四路为水路
-    // }
-}
-
-void SpawningRulesModify() {
-
+void ApplySpawningRulesModify() {
     // *(std::array<uint8_t, 6>*)0x412DCE = {0x5E, 0x5B, 0x8B, 0xE5, 0x5D, 0xC3}; // 原始函数
     *(std::array<uint8_t, 6>*)0x412DCE = {0xE9, 0x51, 0xFF, 0xFF, 0xFF, 0x90};
 
@@ -2888,6 +2896,28 @@ void SpawningRulesModify() {
     }
 }
 
+ACheckBox* AllowPoolAmbushBox;
+ACheckBox* BanPoolAmbushBox;
+ACheckBox* AllowSkyAmbushBox;
+ACheckBox* BanSkyAmbushBox;
+ACheckBox* AllowZomboniBox;
+ACheckBox* BanZomboniBox;
+ACheckBox* AllowSnorkelBox;
+ACheckBox* BanSnorkelBox;
+ACheckBox* AllowDolphinBox;
+ACheckBox* BanDolphinBox;
+ACheckBox* AllowDancingBox;
+ACheckBox* BanDancingBox;
+ACheckBox* AllowDiggerBox;
+ACheckBox* BanDiggerBox;
+ACheckBox* AllowBobsledBox;
+ACheckBox* AllowPeashooterZombieBox;
+ACheckBox* AllowWallnutZombieBox;
+ACheckBox* AllowJalapenoZombieBox;
+ACheckBox* AllowGatlingPeaZombieBox;
+ACheckBox* AllowSquashZombieBox;
+ACheckBox* AllowTallnutZombieBox;
+
 void CreateStageModifyGroup(AWindow* window, int LeftEdge, int TopEdge) {
     constexpr static int SPACE = 5;
     constexpr static int WIDTH = 100;
@@ -2901,35 +2931,10 @@ void CreateStageModifyGroup(AWindow* window, int LeftEdge, int TopEdge) {
     x += SPACE;
     window->AddLabel("场地特性", x, y, WIDTH, HEIGHT);
 
-    // y += SPACE + HEIGHT;
-    // auto Row6PlantBox = window->AddCheckBox("六路种植", x, y, BTNWIDTH, HEIGHT);
-    // Row6PlantBox->SetCheck(settings.Row6Plant);
-    // Row6PlantBox->Connect([=] { settings.Row6Plant = Row6PlantBox->GetCheck(); });
-
-    // y += SPACE + HEIGHT;
-    // auto Row6SpawnBox = window->AddCheckBox("六路出怪", x, y, BTNWIDTH, HEIGHT);
-    // Row6SpawnBox->SetCheck(settings.Row6Spawn);
-    // Row6SpawnBox->Connect([=] { settings.Row6Spawn = Row6SpawnBox->GetCheck(); });
-
-    // y += SPACE + HEIGHT;
-    // auto SmallPoolBox = window->AddCheckBox("迷你泳池", x, y, BTNWIDTH, HEIGHT);
-    // SmallPoolBox->SetCheck(settings.SmallPool);
-    // SmallPoolBox->Connect([=] { settings.SmallPool = SmallPoolBox->GetCheck(); });
-
-    // y += SPACE + HEIGHT;
-    // auto NormalPoolBox = window->AddCheckBox("正常泳池", x, y, BTNWIDTH, HEIGHT);
-    // NormalPoolBox->SetCheck(settings.NormalPool);
-    // NormalPoolBox->Connect([=] { settings.NormalPool = NormalPoolBox->GetCheck(); });
-
-    // y += SPACE + HEIGHT;
-    // auto Row34PoolSpawnBox = window->AddCheckBox("将三四路设为水路", x, y, 150, HEIGHT);
-    // Row34PoolSpawnBox->SetCheck(settings.Row34PoolSpawn);
-    // Row34PoolSpawnBox->Connect([=] { settings.Row34PoolSpawn = Row34PoolSpawnBox->GetCheck(); });
-
     y += SPACE + HEIGHT;
-    auto AllowPoolAmbushBox = window->AddCheckBox("允许珊瑚", x, y, BTNWIDTH, HEIGHT);
+    AllowPoolAmbushBox = window->AddCheckBox("允许珊瑚", x, y, BTNWIDTH, HEIGHT);
     AllowPoolAmbushBox->SetCheck(settings.AllowPoolAmbush);
-    auto BanPoolAmbushBox = window->AddCheckBox("禁止珊瑚", x + WIDTH, y, BTNWIDTH, HEIGHT);
+    BanPoolAmbushBox = window->AddCheckBox("禁止珊瑚", x + WIDTH, y, BTNWIDTH, HEIGHT);
     BanPoolAmbushBox->SetCheck(settings.BanPoolAmbush);
 
     AllowPoolAmbushBox->Connect([=] {
@@ -2938,7 +2943,7 @@ void CreateStageModifyGroup(AWindow* window, int LeftEdge, int TopEdge) {
             settings.BanPoolAmbush = false;
             BanPoolAmbushBox->SetCheck(false);
         }
-        SpawningRulesModify();
+        ApplySpawningRulesModify();
     });
 
     BanPoolAmbushBox->Connect([=] {
@@ -2947,13 +2952,13 @@ void CreateStageModifyGroup(AWindow* window, int LeftEdge, int TopEdge) {
             settings.AllowPoolAmbush = false;
             AllowPoolAmbushBox->SetCheck(false);
         }
-        SpawningRulesModify();
+        ApplySpawningRulesModify();
     });
 
     y += SPACE + HEIGHT;
-    auto AllowSkyAmbushBox = window->AddCheckBox("允许空降", x, y, BTNWIDTH, HEIGHT);
+    AllowSkyAmbushBox = window->AddCheckBox("允许空降", x, y, BTNWIDTH, HEIGHT);
     AllowSkyAmbushBox->SetCheck(settings.AllowSkyAmbush);
-    auto BanSkyAmbushBox = window->AddCheckBox("禁止空降", x + WIDTH, y, BTNWIDTH, HEIGHT);
+    BanSkyAmbushBox = window->AddCheckBox("禁止空降", x + WIDTH, y, BTNWIDTH, HEIGHT);
     BanSkyAmbushBox->SetCheck(settings.BanSkyAmbush);
 
     AllowSkyAmbushBox->Connect([=] {
@@ -2962,7 +2967,7 @@ void CreateStageModifyGroup(AWindow* window, int LeftEdge, int TopEdge) {
             settings.BanSkyAmbush = false;
             BanSkyAmbushBox->SetCheck(false);
         }
-        SpawningRulesModify();
+        ApplySpawningRulesModify();
     });
 
     BanSkyAmbushBox->Connect([=] {
@@ -2971,13 +2976,13 @@ void CreateStageModifyGroup(AWindow* window, int LeftEdge, int TopEdge) {
             settings.AllowSkyAmbush = false;
             AllowSkyAmbushBox->SetCheck(false);
         }
-        SpawningRulesModify();
+        ApplySpawningRulesModify();
     });
 
     y += SPACE + HEIGHT;
-    auto AllowZomboniBox = window->AddCheckBox("允许冰车", x, y, BTNWIDTH, HEIGHT);
+    AllowZomboniBox = window->AddCheckBox("允许冰车", x, y, BTNWIDTH, HEIGHT);
     AllowZomboniBox->SetCheck(settings.AllowZomboni);
-    auto BanZomboniBox = window->AddCheckBox("禁止冰车", x + WIDTH, y, BTNWIDTH, HEIGHT);
+    BanZomboniBox = window->AddCheckBox("禁止冰车", x + WIDTH, y, BTNWIDTH, HEIGHT);
     BanZomboniBox->SetCheck(settings.BanZomboni);
 
     AllowZomboniBox->Connect([=] {
@@ -2986,7 +2991,7 @@ void CreateStageModifyGroup(AWindow* window, int LeftEdge, int TopEdge) {
             settings.BanZomboni = false;
             BanZomboniBox->SetCheck(false);
         }
-        SpawningRulesModify();
+        ApplySpawningRulesModify();
     });
 
     BanZomboniBox->Connect([=] {
@@ -2995,13 +3000,13 @@ void CreateStageModifyGroup(AWindow* window, int LeftEdge, int TopEdge) {
             settings.AllowZomboni = false;
             AllowZomboniBox->SetCheck(false);
         }
-        SpawningRulesModify();
+        ApplySpawningRulesModify();
     });
 
     y += SPACE + HEIGHT;
-    auto AllowSnorkelBox = window->AddCheckBox("允许潜水", x, y, BTNWIDTH, HEIGHT);
+    AllowSnorkelBox = window->AddCheckBox("允许潜水", x, y, BTNWIDTH, HEIGHT);
     AllowSnorkelBox->SetCheck(settings.AllowSnorkel);
-    auto BanSnorkelBox = window->AddCheckBox("禁止潜水", x + WIDTH, y, BTNWIDTH, HEIGHT);
+    BanSnorkelBox = window->AddCheckBox("禁止潜水", x + WIDTH, y, BTNWIDTH, HEIGHT);
     BanSnorkelBox->SetCheck(settings.BanSnorkel);
 
     AllowSnorkelBox->Connect([=] {
@@ -3010,7 +3015,7 @@ void CreateStageModifyGroup(AWindow* window, int LeftEdge, int TopEdge) {
             settings.BanSnorkel = false;
             BanSnorkelBox->SetCheck(false);
         }
-        SpawningRulesModify();
+        ApplySpawningRulesModify();
     });
 
     BanSnorkelBox->Connect([=] {
@@ -3019,13 +3024,13 @@ void CreateStageModifyGroup(AWindow* window, int LeftEdge, int TopEdge) {
             settings.AllowSnorkel = false;
             AllowSnorkelBox->SetCheck(false);
         }
-        SpawningRulesModify();
+        ApplySpawningRulesModify();
     });
 
     y += SPACE + HEIGHT;
-    auto AllowDolphinBox = window->AddCheckBox("允许海豚", x, y, BTNWIDTH, HEIGHT);
+    AllowDolphinBox = window->AddCheckBox("允许海豚", x, y, BTNWIDTH, HEIGHT);
     AllowDolphinBox->SetCheck(settings.AllowDolphin);
-    auto BanDolphinBox = window->AddCheckBox("禁止海豚", x + WIDTH, y, BTNWIDTH, HEIGHT);
+    BanDolphinBox = window->AddCheckBox("禁止海豚", x + WIDTH, y, BTNWIDTH, HEIGHT);
     BanDolphinBox->SetCheck(settings.BanDolphin);
 
     AllowDolphinBox->Connect([=] {
@@ -3034,7 +3039,7 @@ void CreateStageModifyGroup(AWindow* window, int LeftEdge, int TopEdge) {
             settings.BanDolphin = false;
             BanDolphinBox->SetCheck(false);
         }
-        SpawningRulesModify();
+        ApplySpawningRulesModify();
     });
 
     BanDolphinBox->Connect([=] {
@@ -3043,13 +3048,13 @@ void CreateStageModifyGroup(AWindow* window, int LeftEdge, int TopEdge) {
             settings.AllowDolphin = false;
             AllowDolphinBox->SetCheck(false);
         }
-        SpawningRulesModify();
+        ApplySpawningRulesModify();
     });
 
     y += SPACE + HEIGHT;
-    auto AllowDancingBox = window->AddCheckBox("允许舞王", x, y, BTNWIDTH, HEIGHT);
+    AllowDancingBox = window->AddCheckBox("允许舞王", x, y, BTNWIDTH, HEIGHT);
     AllowDancingBox->SetCheck(settings.AllowDancing);
-    auto BanDancingBox = window->AddCheckBox("禁止舞王", x + WIDTH, y, BTNWIDTH, HEIGHT);
+    BanDancingBox = window->AddCheckBox("禁止舞王", x + WIDTH, y, BTNWIDTH, HEIGHT);
     BanDancingBox->SetCheck(settings.BanDancing);
 
     AllowDancingBox->Connect([=] {
@@ -3058,7 +3063,7 @@ void CreateStageModifyGroup(AWindow* window, int LeftEdge, int TopEdge) {
             settings.BanDancing = false;
             BanDancingBox->SetCheck(false);
         }
-        SpawningRulesModify();
+        ApplySpawningRulesModify();
     });
 
     BanDancingBox->Connect([=] {
@@ -3067,13 +3072,13 @@ void CreateStageModifyGroup(AWindow* window, int LeftEdge, int TopEdge) {
             settings.AllowDancing = false;
             AllowDancingBox->SetCheck(false);
         }
-        SpawningRulesModify();
+        ApplySpawningRulesModify();
     });
 
     y += SPACE + HEIGHT;
-    auto AllowDiggerBox = window->AddCheckBox("允许矿工", x, y, BTNWIDTH, HEIGHT);
+    AllowDiggerBox = window->AddCheckBox("允许矿工", x, y, BTNWIDTH, HEIGHT);
     AllowDiggerBox->SetCheck(settings.AllowDigger);
-    auto BanDiggerBox = window->AddCheckBox("禁止矿工", x + WIDTH, y, BTNWIDTH, HEIGHT);
+    BanDiggerBox = window->AddCheckBox("禁止矿工", x + WIDTH, y, BTNWIDTH, HEIGHT);
     BanDiggerBox->SetCheck(settings.BanDigger);
 
     AllowDiggerBox->Connect([=] {
@@ -3082,7 +3087,7 @@ void CreateStageModifyGroup(AWindow* window, int LeftEdge, int TopEdge) {
             settings.BanDigger = false;
             BanDiggerBox->SetCheck(false);
         }
-        SpawningRulesModify();
+        ApplySpawningRulesModify();
     });
 
     BanDiggerBox->Connect([=] {
@@ -3091,89 +3096,294 @@ void CreateStageModifyGroup(AWindow* window, int LeftEdge, int TopEdge) {
             settings.AllowDigger = false;
             AllowDiggerBox->SetCheck(false);
         }
-        SpawningRulesModify();
+        ApplySpawningRulesModify();
     });
 
     y += SPACE + HEIGHT;
-    auto AllowBobsledBox = window->AddCheckBox("允许雪橇", x, y, BTNWIDTH, HEIGHT);
+    AllowBobsledBox = window->AddCheckBox("允许雪橇", x, y, BTNWIDTH, HEIGHT);
     AllowBobsledBox->SetCheck(settings.AllowBobsled);
-    AllowBobsledBox->Connect([=] { settings.AllowBobsled = AllowBobsledBox->GetCheck(); SpawningRulesModify(); });
+    AllowBobsledBox->Connect([=] { settings.AllowBobsled = AllowBobsledBox->GetCheck(); ApplySpawningRulesModify(); });
 
     int TempY = y;
 
     y += SPACE + HEIGHT;
-    auto AllowPeashooterZombieBox = window->AddCheckBox("允许豌豆", x, y, BTNWIDTH, HEIGHT);
+    AllowPeashooterZombieBox = window->AddCheckBox("允许豌豆", x, y, BTNWIDTH, HEIGHT);
     AllowPeashooterZombieBox->SetCheck(settings.AllowPeashooterZombie);
-    AllowPeashooterZombieBox->Connect([=] { settings.AllowPeashooterZombie = AllowPeashooterZombieBox->GetCheck(); SpawningRulesModify(); });
+    AllowPeashooterZombieBox->Connect([=] { settings.AllowPeashooterZombie = AllowPeashooterZombieBox->GetCheck(); ApplySpawningRulesModify(); });
 
     y += SPACE + HEIGHT;
-    auto AllowWallnutZombieBox = window->AddCheckBox("允许坚果", x, y, BTNWIDTH, HEIGHT);
+    AllowWallnutZombieBox = window->AddCheckBox("允许坚果", x, y, BTNWIDTH, HEIGHT);
     AllowWallnutZombieBox->SetCheck(settings.AllowWallnutZombie);
-    AllowWallnutZombieBox->Connect([=] { settings.AllowWallnutZombie = AllowWallnutZombieBox->GetCheck(); SpawningRulesModify(); });
+    AllowWallnutZombieBox->Connect([=] { settings.AllowWallnutZombie = AllowWallnutZombieBox->GetCheck(); ApplySpawningRulesModify(); });
 
     y += SPACE + HEIGHT;
-    auto AllowJalapenoZombieBox = window->AddCheckBox("允许辣椒", x, y, BTNWIDTH, HEIGHT);
+    AllowJalapenoZombieBox = window->AddCheckBox("允许辣椒", x, y, BTNWIDTH, HEIGHT);
     AllowJalapenoZombieBox->SetCheck(settings.AllowJalapenoZombie);
-    AllowJalapenoZombieBox->Connect([=] { settings.AllowJalapenoZombie = AllowJalapenoZombieBox->GetCheck(); SpawningRulesModify(); });
+    AllowJalapenoZombieBox->Connect([=] { settings.AllowJalapenoZombie = AllowJalapenoZombieBox->GetCheck(); ApplySpawningRulesModify(); });
 
     y = TempY;
     x += WIDTH;
 
     y += SPACE + HEIGHT;
-    auto AllowGatlingPeaZombieBox = window->AddCheckBox("允许机枪", x, y, BTNWIDTH, HEIGHT);
+    AllowGatlingPeaZombieBox = window->AddCheckBox("允许机枪", x, y, BTNWIDTH, HEIGHT);
     AllowGatlingPeaZombieBox->SetCheck(settings.AllowGatlingPeaZombie);
-    AllowGatlingPeaZombieBox->Connect([=] { settings.AllowGatlingPeaZombie = AllowGatlingPeaZombieBox->GetCheck(); SpawningRulesModify(); });
+    AllowGatlingPeaZombieBox->Connect([=] { settings.AllowGatlingPeaZombie = AllowGatlingPeaZombieBox->GetCheck(); ApplySpawningRulesModify(); });
 
     y += SPACE + HEIGHT;
-    auto AllowSquashZombieBox = window->AddCheckBox("允许倭瓜", x, y, BTNWIDTH, HEIGHT);
+    AllowSquashZombieBox = window->AddCheckBox("允许倭瓜", x, y, BTNWIDTH, HEIGHT);
     AllowSquashZombieBox->SetCheck(settings.AllowSquashZombie);
-    AllowSquashZombieBox->Connect([=] { settings.AllowSquashZombie = AllowSquashZombieBox->GetCheck(); SpawningRulesModify(); });
+    AllowSquashZombieBox->Connect([=] { settings.AllowSquashZombie = AllowSquashZombieBox->GetCheck(); ApplySpawningRulesModify(); });
 
     y += SPACE + HEIGHT;
-    auto AllowTallnutZombieBox = window->AddCheckBox("允许高坚", x, y, BTNWIDTH, HEIGHT);
+    AllowTallnutZombieBox = window->AddCheckBox("允许高坚", x, y, BTNWIDTH, HEIGHT);
     AllowTallnutZombieBox->SetCheck(settings.AllowTallnutZombie);
-    AllowTallnutZombieBox->Connect([=] { settings.AllowTallnutZombie = AllowTallnutZombieBox->GetCheck(); SpawningRulesModify(); });
+    AllowTallnutZombieBox->Connect([=] { settings.AllowTallnutZombie = AllowTallnutZombieBox->GetCheck(); ApplySpawningRulesModify(); });
 }
 
-AWindow* OtherPageWindow(int pageX, int pageY) {
+std::array<AEdit*, 54> GridTypeEdits;
+std::array<AEdit*, 6> RowTypeEdits;
+
+void ApplyStageModify() {
+    for (size_t i = 0; i < GridTypeEdits.size(); ++i)
+        AGetMainObject()->MRef<uint32_t>(0x168 + 0x4 * i) = std::stoi(GridTypeEdits[i]->GetText());
+    for (size_t i = 0; i < RowTypeEdits.size(); ++i)
+        AGetMainObject()->MRef<uint32_t>(0x5D8 + 0x4 * i) = std::stoi(RowTypeEdits[i]->GetText());
+}
+
+AWindow* StagePageWindow(int pageX, int pageY) {
     auto window = mainWindow.AddWindow(pageX, pageY);
 
     constexpr static int SPACE = 5;
     constexpr static int WIDTH = 100;
-    // constexpr static int HEIGHT = 25;
-    // constexpr static int BTNWIDTH = 75;
+    constexpr static int HEIGHT = 25;
+    constexpr static int EDITWIDTH = 25;
 
     int x = SPACE;
     int y = 0;
-
-    auto Row6Btn = window->AddPushButton("R6E模式", x, y, 100, 25);
-    Row6Btn->Connect([=] {
-        for (int i = 0; i < 9; ++i)
-            AGetMainObject()->MRef<uint32_t>(0x17C + 0x18 * i) = 1; // 六路一到九列为可种
-        AGetMainObject()->MRef<uint32_t>(0x5EC) = 1;                // 六路为陆路
-        for (int i = 5; i < 9; ++i) {
-            AGetMainObject()->MRef<uint32_t>(0x170 + 0x18 * i) = 1; // 三路六到九列为泳池
-            AGetMainObject()->MRef<uint32_t>(0x174 + 0x18 * i) = 1; // 四路六到九列为泳池
-        }
-        AGetMainObject()->MRef<uint32_t>(0x5E0) = 1; // 三路为水路
-        AGetMainObject()->MRef<uint32_t>(0x5E4) = 1; // 四路为水路
-    });
-    x += 100;
-    auto RoofPoolBtn = window->AddPushButton("RPE模式", x, y, 100, 25);
-    RoofPoolBtn->Connect([=] {
-        for (int i = 0; i < 9; ++i)
-            AGetMainObject()->MRef<uint32_t>(0x17C + 0x18 * i) = 1; // 六路一到九列为可种
-        AGetMainObject()->MRef<uint32_t>(0x5EC) = 1;                // 六路为陆路
-        for (int i = 5; i < 9; ++i) {
-            AGetMainObject()->MRef<uint32_t>(0x170 + 0x18 * i) = 3; // 三路六到九列为泳池
-            AGetMainObject()->MRef<uint32_t>(0x174 + 0x18 * i) = 3; // 四路六到九列为泳池
-        }
-        AGetMainObject()->MRef<uint32_t>(0x5E0) = 2; // 三路为水路
-        AGetMainObject()->MRef<uint32_t>(0x5E4) = 2; // 四路为水路
-    });
-    x -= 100;
     CreateStageModifyGroup(window, x + WIDTH * 4 + SPACE * 6, y);
 
+    x = SPACE;
+    APushButton* RowColBtn = window->AddPushButton("0", x, y, EDITWIDTH, HEIGHT);
+    std::array<APushButton*, 6> ThisRowBtn;
+    std::array<APushButton*, 9> ThisColBtn;
+
+    y += SPACE + HEIGHT;
+    for (size_t i = 0; i < ThisRowBtn.size(); ++i) {
+        ThisRowBtn[i] = window->AddPushButton(std::format("{}", i + 1), x, y, EDITWIDTH, HEIGHT);
+        y += SPACE + HEIGHT;
+    }
+    y = 0;
+    x = SPACE + EDITWIDTH + SPACE;
+    for (size_t i = 0; i < ThisColBtn.size(); ++i) {
+        ThisColBtn[i] = window->AddPushButton(std::format("{}", i + 1), x, y, EDITWIDTH, HEIGHT);
+        x += SPACE + EDITWIDTH;
+    }
+    APushButton* RowTypeBtn = window->AddPushButton("10", x, y, EDITWIDTH * 2, HEIGHT);
+
+    x = SPACE + EDITWIDTH + SPACE;
+    y = SPACE + HEIGHT;
+    for (size_t i = 0; i < GridTypeEdits.size(); ++i) {
+        GridTypeEdits[i] = window->AddEdit("?", x, y, EDITWIDTH, HEIGHT, ES_CENTER);
+        y += SPACE + HEIGHT;
+        if (i % 6 == 5) {
+            x += SPACE + EDITWIDTH;
+            y = SPACE + HEIGHT;
+        }
+    }
+    for (size_t i = 0; i < RowTypeEdits.size(); ++i) {
+        RowTypeEdits[i] = window->AddEdit("?", x, y, EDITWIDTH * 2, HEIGHT, ES_CENTER);
+        y += SPACE + HEIGHT;
+    }
+
+    RowColBtn->Connect([=] {
+        FightOrCardUiCheck();
+        if (RowColBtn->GetText() == "🌳") {
+            RowColBtn->SetText("💧");
+            RowTypeBtn->SetText("💧");
+            for (size_t i = 0; i < ThisRowBtn.size(); ++i)
+                ThisRowBtn[i]->SetText("💧");
+            for (size_t i = 0; i < ThisColBtn.size(); ++i)
+                ThisColBtn[i]->SetText("💧");
+            for (size_t i = 0; i < GridTypeEdits.size(); ++i)
+                GridTypeEdits[i]->SetText("3");
+            for (size_t i = 0; i < RowTypeEdits.size(); ++i)
+                RowTypeEdits[i]->SetText("2");
+        } else if (RowColBtn->GetText() == "💧") {
+            RowColBtn->SetText("🚫");
+            RowTypeBtn->SetText("🚫");
+            for (size_t i = 0; i < ThisRowBtn.size(); ++i)
+                ThisRowBtn[i]->SetText("🚫");
+            for (size_t i = 0; i < ThisColBtn.size(); ++i)
+                ThisColBtn[i]->SetText("🚫");
+            for (size_t i = 0; i < GridTypeEdits.size(); ++i)
+                GridTypeEdits[i]->SetText("2");
+            for (size_t i = 0; i < RowTypeEdits.size(); ++i)
+                RowTypeEdits[i]->SetText("0");
+        } else {
+            RowColBtn->SetText("🌳");
+            RowTypeBtn->SetText("🌳");
+            for (size_t i = 0; i < ThisRowBtn.size(); ++i)
+                ThisRowBtn[i]->SetText("🌳");
+            for (size_t i = 0; i < ThisColBtn.size(); ++i)
+                ThisColBtn[i]->SetText("🌳");
+            for (size_t i = 0; i < GridTypeEdits.size(); ++i)
+                GridTypeEdits[i]->SetText("1");
+            for (size_t i = 0; i < RowTypeEdits.size(); ++i)
+                RowTypeEdits[i]->SetText("1");
+        }
+        ApplyStageModify();
+    });
+    RowTypeBtn->Connect([=] {
+        FightOrCardUiCheck();
+        if (RowTypeBtn->GetText() == "🌳") {
+            RowTypeBtn->SetText("💧");
+            for (size_t i = 0; i < RowTypeEdits.size(); ++i)
+                RowTypeEdits[i]->SetText("2");
+        } else if (RowTypeBtn->GetText() == "💧") {
+            RowTypeBtn->SetText("🚫");
+            for (size_t i = 0; i < RowTypeEdits.size(); ++i)
+                RowTypeEdits[i]->SetText("0");
+        } else {
+            RowTypeBtn->SetText("🌳");
+            for (size_t i = 0; i < RowTypeEdits.size(); ++i)
+                RowTypeEdits[i]->SetText("1");
+        }
+        ApplyStageModify();
+    });
+    for (size_t i = 0; i < ThisRowBtn.size(); ++i) {
+        ThisRowBtn[i]->Connect([=] {
+            FightOrCardUiCheck();
+            if (ThisRowBtn[i]->GetText() == "🌳") {
+                ThisRowBtn[i]->SetText("💧");
+                for (size_t j = 0; j < GridTypeEdits.size(); ++j)
+                    if (j % 6 == i)
+                        GridTypeEdits[j]->SetText("3");
+                RowTypeEdits[i]->SetText("2");
+            } else if (ThisRowBtn[i]->GetText() == "💧") {
+                ThisRowBtn[i]->SetText("🚫");
+                for (size_t j = 0; j < GridTypeEdits.size(); ++j)
+                    if (j % 6 == i)
+                        GridTypeEdits[j]->SetText("2");
+                RowTypeEdits[i]->SetText("0");
+            } else {
+                ThisRowBtn[i]->SetText("🌳");
+                for (size_t j = 0; j < GridTypeEdits.size(); ++j)
+                    if (j % 6 == i)
+                        GridTypeEdits[j]->SetText("1");
+                RowTypeEdits[i]->SetText("1");
+            }
+            ApplyStageModify();
+        });
+    }
+    for (size_t i = 0; i < ThisColBtn.size(); ++i) {
+        ThisColBtn[i]->Connect([=] {
+            FightOrCardUiCheck();
+            if (ThisColBtn[i]->GetText() == "🌳") {
+                ThisColBtn[i]->SetText("💧");
+                for (size_t j = 0; j < GridTypeEdits.size(); ++j)
+                    if (j / 6 == i)
+                        GridTypeEdits[j]->SetText("3");
+            } else if (ThisColBtn[i]->GetText() == "💧") {
+                ThisColBtn[i]->SetText("🚫");
+                for (size_t j = 0; j < GridTypeEdits.size(); ++j)
+                    if (j / 6 == i)
+                        GridTypeEdits[j]->SetText("2");
+            } else {
+                ThisColBtn[i]->SetText("🌳");
+                for (size_t j = 0; j < GridTypeEdits.size(); ++j)
+                    if (j / 6 == i)
+                        GridTypeEdits[j]->SetText("1");
+            }
+            ApplyStageModify();
+        });
+    }
+
+    y = SPACE + HEIGHT;
+    y += 6 * (SPACE + HEIGHT);
+    x = SPACE;
+    auto StageModifyBtn = window->AddPushButton("一键设置", x, y, WIDTH, HEIGHT);
+    StageModifyBtn->Connect([=] {
+        FightOrCardUiCheck();
+        ApplyStageModify();
+    });
+    x += 100;
+    auto Row6Btn = window->AddPushButton("R6E模式", x, y, WIDTH, HEIGHT);
+    Row6Btn->Connect([=] {
+        FightOrCardUiCheck();
+        for (size_t i = 0; i < GridTypeEdits.size(); ++i)
+            GridTypeEdits[i]->SetText("1");
+        for (size_t i = 0; i < RowTypeEdits.size(); ++i)
+            RowTypeEdits[i]->SetText("1");
+        ApplyStageModify();
+        AllowSkyAmbushBox->SetCheck(true);
+        settings.AllowSkyAmbush = AllowSkyAmbushBox->GetCheck();
+        if (AllowSkyAmbushBox->GetCheck() && BanSkyAmbushBox->GetCheck()) {
+            settings.BanSkyAmbush = false;
+            BanSkyAmbushBox->SetCheck(false);
+        }
+        AllowPoolAmbushBox->SetCheck(false);
+        settings.AllowPoolAmbush = AllowPoolAmbushBox->GetCheck();
+        if (AllowPoolAmbushBox->GetCheck() && BanPoolAmbushBox->GetCheck()) {
+            settings.BanPoolAmbush = false;
+            BanPoolAmbushBox->SetCheck(false);
+        }
+        AllowSnorkelBox->SetCheck(false);
+        settings.AllowSnorkel = AllowSnorkelBox->GetCheck();
+        if (AllowSnorkelBox->GetCheck() && BanSnorkelBox->GetCheck()) {
+            settings.BanSnorkel = false;
+            BanSnorkelBox->SetCheck(false);
+        }
+        AllowDolphinBox->SetCheck(false);
+        settings.AllowDolphin = AllowDolphinBox->GetCheck();
+        if (AllowDolphinBox->GetCheck() && BanDolphinBox->GetCheck()) {
+            settings.BanDolphin = false;
+            BanDolphinBox->SetCheck(false);
+        }
+        ApplySpawningRulesModify();
+    });
+    x += 100;
+    auto RoofPoolBtn = window->AddPushButton("RPE模式", x, y, WIDTH, HEIGHT);
+    RoofPoolBtn->Connect([=] {
+        FightOrCardUiCheck();
+        for (size_t i = 0; i < GridTypeEdits.size(); ++i) {
+            if ((i % 6 == 2 || i % 6 == 3) && i >= 30)
+                GridTypeEdits[i]->SetText("3");
+            else
+                GridTypeEdits[i]->SetText("1");
+        }
+        for (size_t i = 0; i < RowTypeEdits.size(); ++i) {
+            if (i % 6 == 2 || i % 6 == 3)
+                RowTypeEdits[i]->SetText("2");
+            else
+                RowTypeEdits[i]->SetText("1");
+        }
+        ApplyStageModify();
+        AllowSkyAmbushBox->SetCheck(true);
+        settings.AllowSkyAmbush = AllowSkyAmbushBox->GetCheck();
+        if (AllowSkyAmbushBox->GetCheck() && BanSkyAmbushBox->GetCheck()) {
+            settings.BanSkyAmbush = false;
+            BanSkyAmbushBox->SetCheck(false);
+        }
+        AllowPoolAmbushBox->SetCheck(true);
+        settings.AllowPoolAmbush = AllowPoolAmbushBox->GetCheck();
+        if (AllowPoolAmbushBox->GetCheck() && BanPoolAmbushBox->GetCheck()) {
+            settings.BanPoolAmbush = false;
+            BanPoolAmbushBox->SetCheck(false);
+        }
+        AllowSnorkelBox->SetCheck(true);
+        settings.AllowSnorkel = AllowSnorkelBox->GetCheck();
+        if (AllowSnorkelBox->GetCheck() && BanSnorkelBox->GetCheck()) {
+            settings.BanSnorkel = false;
+            BanSnorkelBox->SetCheck(false);
+        }
+        AllowDolphinBox->SetCheck(true);
+        settings.AllowDolphin = AllowDolphinBox->GetCheck();
+        if (AllowDolphinBox->GetCheck() && BanDolphinBox->GetCheck()) {
+            settings.BanDolphin = false;
+            BanDolphinBox->SetCheck(false);
+        }
+        ApplySpawningRulesModify();
+    });
     return window;
 }
 
@@ -3216,14 +3426,14 @@ AOnAfterInject({
     x += TOPWIDTH;
     auto spawnPageBtn = mainWindow.AddPushButton("出怪设置", x, 0, TOPWIDTH, TOPHEIGHT);
     x += TOPWIDTH;
-    auto otherPageBtn = mainWindow.AddPushButton("场地设置", x, 0, TOPWIDTH, TOPHEIGHT);
+    auto stagePageBtn = mainWindow.AddPushButton("场地设置", x, 0, TOPWIDTH, TOPHEIGHT);
     mainWindow.AddPushButton("", 0, TOPHEIGHT, 635, 5);
 
     auto basicPage = BasicPageWindow(0, TOPHEIGHT + SPACE);
     auto displayPage = DisplayPageWindow(0, TOPHEIGHT + SPACE);
     auto keyPage = KeyPageWindow(0, TOPHEIGHT + SPACE);
     auto spawnPage = SpawnPageWindow(0, TOPHEIGHT + SPACE);
-    auto otherPage = OtherPageWindow(0, TOPHEIGHT + SPACE);
+    auto stagePage = StagePageWindow(0, TOPHEIGHT + SPACE);
 
     mainWindow.AddLabel("", 5, MAIN_HEIGHT - 78, 624, 44);
     mainWindow.AddLabel("信息:", 10, MAIN_HEIGHT - 78, 40, 44);
@@ -3232,43 +3442,43 @@ AOnAfterInject({
     keyPage->Hide();
     displayPage->Hide();
     spawnPage->Hide();
-    otherPage->Hide();
+    stagePage->Hide();
     basicPage->Show();
 
     AConnect(basicPageBtn, [=] {
         keyPage->Hide();
         displayPage->Hide();
         spawnPage->Hide();
-        otherPage->Hide();
+        stagePage->Hide();
         basicPage->Show();
     });
     AConnect(displayPageBtn, [=] {
         basicPage->Hide();
         keyPage->Hide();
         spawnPage->Hide();
-        otherPage->Hide();
+        stagePage->Hide();
         displayPage->Show();
     });
     AConnect(keyPageBtn, [=] {
         basicPage->Hide();
         displayPage->Hide();
         spawnPage->Hide();
-        otherPage->Hide();
+        stagePage->Hide();
         keyPage->Show();
     });
     AConnect(spawnPageBtn, [=] {
         basicPage->Hide();
         displayPage->Hide();
         keyPage->Hide();
-        otherPage->Hide();
+        stagePage->Hide();
         spawnPage->Show();
     });
-    AConnect(otherPageBtn, [=] {
+    AConnect(stagePageBtn, [=] {
         basicPage->Hide();
         displayPage->Hide();
         keyPage->Hide();
         spawnPage->Hide();
-        otherPage->Show();
+        stagePage->Show();
     });
 });
 
@@ -3291,17 +3501,19 @@ AOnEnterFight({
         AAverageSpawn();
     aReplay.SetMaxSaveCnt(INT_MAX);
     aReplay.SetShowInfo(false);
-    // SpawningRulesModify();
+    // ApplySpawningRulesModify();
     zombieListInfo_update();
     if (settings.AutoRecordOnGameStart && AMRef<int>(0x6A9EC0, 0x7F8) != AAsm::CHALLENGE_ICE) {
         compressor->SetFilePath(settings.savePath + std::string("/") + GetCurTimeStr() + ".7z");
         aReplay.StartRecord(std::round(settings.recordTickInterval));
         Info("Replay : 开始录制");
     }
-    if (settings.ShowMe)
+    if (settings.ShowMe) {
         tickShowMe.Start();
-    else
+    } else {
         tickShowMe.Stop();
+    }
+
     for (size_t i = 0; i < keyHandles.size(); ++i)
         keyHandles[i].Stop();
     for (size_t i = 0; i < keyHandles.size(); ++i)
@@ -3314,12 +3526,20 @@ AOnExitFight({
         keyHandles[i].Stop();
     if (spawnseedEdit)
         spawnseedEdit->SetText("No Seed");
+    for (size_t i = 0; i < GridTypeEdits.size(); ++i)
+        if (GridTypeEdits[i])
+            GridTypeEdits[i]->SetText("?");
+    for (size_t i = 0; i < RowTypeEdits.size(); ++i)
+        if (RowTypeEdits[i])
+            RowTypeEdits[i]->SetText("?");
 });
 
 // ALogger<AConsole> ConsoleLogger;
 
 // 不进家
-void __stdcall AsmCallBack1(AAsmCodeContext* context) {
+void __stdcall AsmCallBackEnterHousePause(AAsmCodeContext* context) {
+    if (!settings.EnterHousePause)
+        return;
     context->eip = 0x4138C9;
     Paused = true;
     PausedSlowed = false;
@@ -3336,7 +3556,7 @@ void AScript() {
     AMaidCheats::Phase() = MaidPhase;
 
     // 不进家
-    AInsertUniqueAsmCode(0x413400, AsmCallBack1);
+    AInsertUniqueAsmCode(0x413400, AsmCallBackEnterHousePause);
 
     fightInfoPainter.SetFontSize(17); // 波数时间，僵尸计数
     lowIndexPainter.SetFont("Arial");
@@ -3357,4 +3577,10 @@ void AScript() {
 
     if (spawnseedEdit)
         spawnseedEdit->SetText(std::format("{:08X}", AGetMainObject()->MRef<uint32_t>(0x561C)));
+    for (size_t i = 0; i < GridTypeEdits.size(); ++i)
+        if (GridTypeEdits[i])
+            GridTypeEdits[i]->SetText(std::format("{}", AGetMainObject()->MRef<uint32_t>(0x168 + 0x4 * i)));
+    for (size_t i = 0; i < RowTypeEdits.size(); ++i)
+        if (RowTypeEdits[i])
+            RowTypeEdits[i]->SetText(std::format("{}", AGetMainObject()->MRef<uint32_t>(0x5D8 + 0x4 * i)));
 }
