@@ -121,4 +121,32 @@ inline bool isIceTrailCover(int Row, int Col) {
     return IceCovered;
 }
 
+// 设定关卡的基础初始数据，包括出怪类型数组、出怪列表和第一波僵尸的倒计时等
+inline void InitZombieWaves() {
+    asm volatile(
+        "movl 0x6A9EC0, %%eax;"     // 将种子地址加载到 eax
+        "movl 0x768(%%eax), %%eax;" // 通过偏移 0x768 更新 eax
+        "movl $0x40ABB0, %%edx;"    // 将目标函数地址加载到 edx
+        "calll *%%edx;"             // 通过 edx 指针调用目标函数
+        :
+        :
+        : "eax", "edx");
+}
+
+// 生成关卡可能出现的僵尸的预览
+inline void PlaceStreetZombies() {
+    *(uint8_t*)0x0043A153 = 0x80;
+    asm volatile(
+        "movl 0x6A9EC0, %%eax;"
+        "movl 0x768(%%eax), %%eax;"
+        "movl 0x15C(%%eax), %%eax;" // eax = CutScene* this
+        "pushl %%eax;"              // 將 this 指針壓棧作為參數
+        "movl $0x43A140, %%edx;"    // 函數地址
+        "calll *%%edx;"             // 調用
+        :
+        :
+        : "eax", "edx");
+    *(uint8_t*)0x0043A153 = 0x85;
+}
+
 #endif //!__ASM_FUNC_H__

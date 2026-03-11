@@ -3,7 +3,7 @@
 // 本辅助工具目前版本使用的键控注入框架应使用AvZ2 20250225版本，源码不保证对更旧版本AvZ的兼容性
 
 #define UNICODE
-#define A_TAS_VERSION 202504060322
+#define A_TAS_VERSION 202504080330
 #include "AsmFunc.h"
 #include "Draw.h"
 #include "dsl.h"
@@ -1850,6 +1850,7 @@ AWindow* KeyPageWindow(int pageX, int pageY) {
 ALabel* zombieListName_label = nullptr;
 ALabel* zombieListInfo_label[20] = {};
 ALabel* zombieListSum_label = nullptr;
+AEdit* spawnseedEdit = nullptr;
 
 void zombieListInfo_update() {
     const char* name_list[33] = {"普僵", "旗帜", "路障", "撑杆", "铁桶", "读报", "铁门", "橄榄", "舞王", "伴舞", "鸭子", "潜水", "冰车", "雪橇", "海豚", "小丑", "气球", "矿工", "跳跳", "雪人", "蹦极", "扶梯", "投篮", "白眼", "小鬼", "僵博", "豌豆", "坚果", "辣椒", "机枪", "倭瓜", "高坚", "红眼"};
@@ -1865,7 +1866,7 @@ void zombieListInfo_update() {
                 zombie_list[tmp][w - 1]++;
         }
     for (int i = 0; i <= 32; i++) {
-        if (i == 1)
+        if (i == 1 || i == 19)
             continue;
         for (int w = 0; w < 20; w++)
             zombie_sum[i] += zombie_list[i][w];
@@ -1967,13 +1968,19 @@ AWindow* SpawnPageWindow(int pageX, int pageY) {
 
     int x = SPACE + 6 * (WIDTH + SPACE + 3);
     int y = (HEIGHT + SPACE) * 4 + SPACE * 1 - 70;
-    // int CurrentSeed = 0;
-    // if (AGetMainObject() != nullptr)
-    //     CurrentSeed = AGetMainObject()->MRef<int>(0x561C);
-    auto spawnseedEdit = window->AddEdit("00000000", x, y, 110, 25, ES_CENTER);
+    spawnseedEdit = window->AddEdit("No Seed", x, y, 110, 25, ES_CENTER);
     x += 2 * (WIDTH + SPACE + 3);
-    auto spawnseedBtn = window->AddPushButton("⬅️换种子", x, y, 110, 25);
-    spawnseedBtn->Connect([=] { FightOrCardUiCheck(); AGetMainObject()->MRef<int>(0x561C) = std::stoul(spawnseedEdit->GetText(), nullptr, 16); ::Info("种子已更改，将于下次选卡生效"); });
+    auto spawnseedBtn = window->AddPushButton("⬅️依此种子刷怪", x, y, 110, 25);
+    spawnseedBtn->Connect([=] {
+        FightOrCardUiCheck();
+        AGetMainObject()->MRef<uint32_t>(0x561C) = std::stoul(spawnseedEdit->GetText(), nullptr, 16);
+        InitZombieWaves();
+        zombieListInfo_update();
+        if (AGetPvzBase()->GameUi() != 2)
+            return;
+        AAsm::KillZombiesPreview();
+        PlaceStreetZombies();
+    });
 
     x = SPACE;
     y += HEIGHT + SPACE;
@@ -2050,8 +2057,6 @@ AOnAfterInject({
     if (!LoadSettings())
         keyBindings = keyDefaults;
 
-    // 点图鉴卡死问题
-    *(std::array<uint8_t, 2>*)0x486B0A = {0x90, 0x90};
     *(std::array<uint8_t, 3>*)0x42DF5D = {0x38, 0x59, 0x54};
     *(std::array<uint8_t, 3>*)0x471DCF = {0xEB, 0x24, 0x90};
 
@@ -2120,6 +2125,8 @@ AOnExitFight({
     LeftmostVisibleArea.assign(6, 10);
     for (size_t i = 0; i < keyHandles.size(); ++i)
         keyHandles[i].Stop();
+    if (spawnseedEdit)
+        spawnseedEdit->SetText("No Seed");
 });
 
 // ALogger<AConsole> ConsoleLogger;
@@ -2146,4 +2153,7 @@ void AScript() {
         keyHandles[i].Stop();
     for (size_t i = 0; i < keyHandles.size(); ++i)
         keyHandles[i] = AConnect(keyBindings[i], funcs[i]);
+
+    if (spawnseedEdit)
+        spawnseedEdit->SetText(std::format("{:08X}", AGetMainObject()->MRef<uint32_t>(0x561C)));
 }
