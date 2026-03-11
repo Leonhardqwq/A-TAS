@@ -3,7 +3,7 @@
 // 本辅助工具目前版本使用的键控注入框架应使用AvZ2 2.8.4 20250515版本，源码不保证对更旧版本AvZ的兼容性
 
 #define UNICODE
-#define A_TAS_VERSION 202505220015
+#define A_TAS_VERSION 202506232150
 #include "AsmFunc.h"
 #include "Draw.h"
 #include "dsl.h"
@@ -186,10 +186,9 @@ bool LoadKeybindings() {
             auto it = std::ranges::find(btnLabels, key);
             if (it != btnLabels.end()) {
                 value.clear();
-                if (std::getline(iss, value) && !value.empty()) {
-                    auto i = std::distance(btnLabels.begin(), it);
-                    keyBindings[i] = value;
-                }
+                std::getline(iss, value);
+                auto i = std::distance(btnLabels.begin(), it);
+                keyBindings[i] = value;
             }
         }
     }
@@ -1883,7 +1882,7 @@ AWindow* BasicPageWindow(int pageX, int pageY) {
     x += BTNWIDTH + SPACE;
     auto WavelengthRecordComboBox = window->AddComboBox(x, y, 50, 500);
     WavelengthRecordComboBox->AddString("0", "1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11", "12", "13", "14", "15", "16", "17", "18", "19", "20");
-    WavelengthRecordComboBox->SetText("3");
+    WavelengthRecordComboBox->SetText(std::to_string(settings.WavelengthRecord));
 
     x += WavelengthRecordComboBox->GetWidth() + SPACE;
 
@@ -1892,6 +1891,7 @@ AWindow* BasicPageWindow(int pageX, int pageY) {
     x += BTNWIDTH + SPACE;
     auto SkipTickWaveComboBox = window->AddComboBox(x, y, 50, 500);
     SkipTickWaveComboBox->AddString("0", "1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11", "12", "13", "14", "15", "16", "17", "18", "19", "20");
+    SkipTickWaveComboBox->SetText(std::to_string(settings.SkipTickWave));
 
     x += SkipTickWaveComboBox->GetWidth() + SPACE;
 
@@ -1900,6 +1900,12 @@ AWindow* BasicPageWindow(int pageX, int pageY) {
     x += BTNWIDTH + SPACE;
     auto LockStateComboBox = window->AddComboBox(x, y, 76, 500);
     LockStateComboBox->AddString("-", "No", "Yes");
+    if (settings.ReadOnly == -1)
+        LockStateComboBox->SetText("-");
+    if (settings.ReadOnly == 0)
+        LockStateComboBox->SetText("No");
+    if (settings.ReadOnly == 1)
+        LockStateComboBox->SetText("Yes");
 
     x += LockStateComboBox->GetWidth() + SPACE;
 
@@ -1918,16 +1924,17 @@ AWindow* BasicPageWindow(int pageX, int pageY) {
     ApplyAllBtn->Connect([=] {
         std::strcpy(settings.SpeedGears, SpeedGearsEdit->GetText().c_str());
         SetGameSpeedGears(SpeedGearsEdit->GetText());
-        settings.WavelengthRecord = std::stoi(WavelengthRecordComboBox->GetString());
-        settings.SkipTickWave = std::stoi(SkipTickWaveComboBox->GetString());
-        if (LockStateComboBox->GetString() == "-")
+        settings.WavelengthRecord = std::stoi(WavelengthRecordComboBox->GetText());
+        settings.SkipTickWave = std::stoi(SkipTickWaveComboBox->GetText());
+        if (LockStateComboBox->GetText() == "-")
             settings.ReadOnly = -1;
-        if (LockStateComboBox->GetString() == "No")
+        if (LockStateComboBox->GetText() == "No")
             settings.ReadOnly = 0;
-        if (LockStateComboBox->GetString() == "Yes")
+        if (LockStateComboBox->GetText() == "Yes")
             settings.ReadOnly = 1;
-        if (MusicComboBox->GetString() != "-")
-            SetMusic(std::stoi(MusicComboBox->GetString()));
+        if (MusicComboBox->GetText() != "-")
+            SetMusic(std::stoi(MusicComboBox->GetText()));
+        Info("一键设置成功");
     });
 
     x = SPACE;
@@ -1997,6 +2004,8 @@ AWindow* KeyPageWindow(int pageX, int pageY) {
             keyHandles[i].Stop();
         for (size_t i = 0; i < keyHandles.size(); ++i)
             keyHandles[i] = AConnect(keyBindings[i], funcs[i]);
+        for (size_t i = 0; i < keyEdits.size(); ++i)
+            keyEdits[i]->SetText("");
         Info("已将所有按键解除绑定");
     });
 
@@ -2011,6 +2020,8 @@ AWindow* KeyPageWindow(int pageX, int pageY) {
             keyHandles[i].Stop();
         for (size_t i = 0; i < keyHandles.size(); ++i)
             keyHandles[i] = AConnect(keyBindings[i], funcs[i]);
+        for (size_t i = 0; i < keyEdits.size(); ++i)
+            keyEdits[i]->SetText(keyDefaults[i]);
         Info("已将所有按键初始化");
     });
 
@@ -2029,6 +2040,7 @@ AWindow* KeyPageWindow(int pageX, int pageY) {
     });
 
     x += loadSettingsBtn->GetWidth() + SPACE;
+
     // 导出配置文件
     auto saveSettingsBtn = window->AddPushButton("导出按键配置", x, y, 100, HEIGHT);
     saveSettingsBtn->Connect([=] {
