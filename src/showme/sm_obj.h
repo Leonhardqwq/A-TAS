@@ -56,10 +56,11 @@ public:
     // 使用示例
     // SetShowInfoFunc([=](APlant* plant) {
     //     std::string text;
-    //     text += "类型:" + _nameDict[plant->type()] + '\n';
-    //     text += "血量:" + std::to_string(plant->hp());
+    //     text += std::format("类型:{}\n", _nameDict[plant->Type()]);
+    //     text += std::format("血量:{}\n", plant->Hp());
     //     return text;
     // }); ------- 显示植物中的 类型 和 血量 信息
+
     template <typename Func>
         requires std::is_convertible_v<Func, InfoFunc<T>>
     void SetShowInfoFunc(Func&& func) {
@@ -131,8 +132,12 @@ inline SMShowObj<APlant>::SMShowObj() {
     // 初始化字符串生成函数
     _infoFunc = [=](APlant* plant) {
         std::string text;
-        text += "" + _nameDict[plant->Type()] + '\n';
-        text += "HP:" + std::to_string(plant->Hp());
+        text += std::format("{}\n", _nameDict[plant->Type()]);
+        text += std::format("HP:{}\n", plant->Hp());
+        if (ARangeIn(plant->Type(), {ASUNFLOWER, ASUN_SHROOM, AMARIGOLD, ATWIN_SUNFLOWER}) && !plant->IsSleeping())
+            text += std::format("CD:{}\n", plant->MRef<int>(0x58));
+        if (plant->Type() == ACOB_CANNON && AGetCobRecoverTime(plant->Index()))
+            text += std::format("CD:{}\n", AGetCobRecoverTime(plant->Index()));
         return text;
     };
 
@@ -140,12 +145,12 @@ inline SMShowObj<APlant>::SMShowObj() {
         "豌豆射手", "向日葵", "樱桃炸弹", "坚果", "土豆雷",
         "寒冰射手", "大嘴花", "双发射手", "小喷菇", "阳光菇",
         "大喷菇", "墓碑吞噬者", "魅惑菇", "胆小菇", "寒冰菇",
-        "毁灭菇", "睡莲", "倭瓜", "三线射手", "缠绕海藻",
+        "毁灭菇", "荷叶", "窝瓜", "三线射手", "缠绕水草",
         "火爆辣椒", "地刺", "火炬树桩", "高坚果", "海蘑菇",
         "路灯花", "仙人掌", "三叶草", "裂荚射手", "杨桃",
         "南瓜头", "磁力菇", "卷心菜投手", "花盆", "玉米投手",
         "咖啡豆", "大蒜", "叶子保护伞", "金盏花", "西瓜投手",
-        "机枪射手", "双子向日葵", "忧郁蘑菇", "香蒲", "冰瓜",
+        "机枪射手", "双子向日葵", "忧郁菇", "香蒲", "冰瓜",
         "吸金磁", "地刺王", "玉米加农炮", "模仿者"};
 
     std::pair<int, SMFindInfo> temp(__SM_DEFAULT_STATE, SMFindInfo(30, 0.5, 0.5));
@@ -192,8 +197,8 @@ inline SMShowObj<AZombie>::SMShowObj() {
     _typeDict.assign(__SM_ZOMBIE_TOTAL + 1, 1);
     _infoFunc = [=](AZombie* zombie) {
         std::string text;
-        text += "" + _nameDict[zombie->Type()] + '\n';
-        text += "HP:" + std::to_string(zombie->Hp());
+        text += std::format("{}\n", _nameDict[zombie->Type()]);
+        text += std::format("HP:{}\n", zombie->Hp());
         return text;
     };
     _nameDict = {
@@ -202,7 +207,7 @@ inline SMShowObj<AZombie>::SMShowObj() {
         "冰车", "雪橇", "海豚", "小丑", "气球", "矿工",
         "跳跳", "雪人", "蹦极", "扶梯", "投篮", "白眼",
         "小鬼", "僵博", "豌豆", "坚果", "辣椒", "机枪",
-        "倭瓜", "高坚", "红眼"};
+        "窝瓜", "高坚", "红眼"};
 
     std::pair<int, SMFindInfo> temp(__SM_DEFAULT_STATE, SMFindInfo(30, 1.2, 0.5));
 
@@ -255,20 +260,20 @@ inline SMShowObj<ASeed>::SMShowObj() {
     _typeDict.assign(__SM_PLANT_TOTAL + 1, 1);
     _infoFunc = [=](ASeed* seed) {
         std::string text;
-        text += "" + _nameDict[seed->Type()] + '\n';
-        text += "CD:" + std::to_string(seed->IsUsable() ? 0 : seed->InitialCd() - seed->Cd());
+        text += std::format("{}\n", _nameDict[seed->Type()]);
+        text += std::format("CD:{}\n", seed->IsUsable() ? 0 : (seed->InitialCd() ? seed->InitialCd() - seed->Cd() + 1 : 0));
         return text;
     };
     _nameDict = {
         "豌豆射手", "向日葵", "樱桃炸弹", "坚果", "土豆雷",
         "寒冰射手", "大嘴花", "双发射手", "小喷菇", "阳光菇",
         "大喷菇", "墓碑吞噬者", "魅惑菇", "胆小菇", "寒冰菇",
-        "毁灭菇", "睡莲", "倭瓜", "三线射手", "缠绕海藻",
+        "毁灭菇", "荷叶", "窝瓜", "三线射手", "缠绕水草",
         "火爆辣椒", "地刺", "火炬树桩", "高坚果", "海蘑菇",
         "路灯花", "仙人掌", "三叶草", "裂荚射手", "杨桃",
         "南瓜头", "磁力菇", "卷心菜投手", "花盆", "玉米投手",
         "咖啡豆", "大蒜", "叶子保护伞", "金盏花", "西瓜投手",
-        "机枪射手", "双子向日葵", "忧郁蘑菇", "香蒲", "冰瓜",
+        "机枪射手", "双子向日葵", "忧郁菇", "香蒲", "冰瓜",
         "吸金磁", "地刺王", "玉米加农炮", "模仿者"};
 }
 
@@ -301,8 +306,8 @@ inline SMShowObj<APlaceItem>::SMShowObj() {
     _typeDict.back() = 1;
     _infoFunc = [=](APlaceItem* place_item) {
         std::string text;
-        text += "" + _nameDict[place_item->Type()] + '\n';
-        text += "值:" + std::to_string(place_item->Value());
+        text += std::format("{}\n", _nameDict[place_item->Type()]);
+        text += std::format("值:{}\n", place_item->Value());
         return text;
     };
     _nameDict = {

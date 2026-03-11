@@ -13,9 +13,9 @@ inline void SetMusic(int musicid) {
                  "movl 0x83C(%%eax), %%eax;"
                  "movl $0x45B750, %%edx;"
                  "calll *%%edx;"
-        :
-        : [musicid] "rm"(musicid)
-        : "eax", "edx", "edi");
+                 :
+                 : [musicid] "rm"(musicid)
+                 : "eax", "edx", "edi");
 }
 
 // 在当帧更新植物动画的颜色
@@ -29,9 +29,9 @@ inline void UpdateReanimColor(int plant_index) {
                  "pushl %%eax;"
                  "movl $0x4635C0, %%edx;"
                  "calll *%%edx;"
-        :
-        : [plant_index] "m"(plant_index)
-        : "eax", "ecx", "edx");
+                 :
+                 : [plant_index] "m"(plant_index)
+                 : "eax", "ecx", "edx");
 }
 
 // 设定Dance
@@ -42,9 +42,9 @@ inline void SetDance(bool state) {
                  "movl %[state], %%ebx;"
                  "movl $0x41AFD0, %%eax;"
                  "calll *%%eax;"
-        :
-        : [state] "rm"(unsigned(state))
-        : "eax", "ebx", "ecx");
+                 :
+                 : [state] "rm"(unsigned(state))
+                 : "eax", "ebx", "ecx");
 }
 
 // -1 = 正常，0 = 加速，1 = 减速
@@ -99,9 +99,9 @@ void CreateCaption(const std::string& content, CaptionSet captionSet = {}, Capti
                  "movl %[_str], %%edx;"
                  "movl $0x459010, %%eax;"
                  "calll *%%eax;"
-        :
-        : [_str] "m"(_str), [style] "m"(captionSet.style)
-        : "eax", "ecx", "edx", "esi");
+                 :
+                 : [_str] "m"(_str), [style] "m"(captionSet.style)
+                 : "eax", "ecx", "edx", "esi");
     AGetMainObject()->Words()->DisappearCountdown() = captionSet.duration;
 }
 
@@ -115,9 +115,9 @@ inline bool isIceTrailCover(int Row, int Col) {
                  "movl $0x40DFC0, %%ecx;"
                  "calll *%%ecx;"
                  "mov %%eax, %[IceCovered];"
-        : [IceCovered] "=rm"(IceCovered)
-        : [Row] "rm"(Row - 1), [Col] "rm"(Col - 1)
-        : "eax", "ecx", "esi");
+                 : [IceCovered] "=rm"(IceCovered)
+                 : [Row] "rm"(Row - 1), [Col] "rm"(Col - 1)
+                 : "eax", "ecx", "esi");
     return IceCovered;
 }
 
@@ -147,6 +147,47 @@ inline void PlaceStreetZombies() {
         :
         : "eax", "edx");
     *(uint8_t*)0x0043A153 = 0x85;
+}
+
+inline void EnterGame(int gameMode) {
+    auto gameUi = AGetPvzBase()->GameUi();
+    if (gameUi == 0 || gameUi == 1) {
+        if (gameUi == 0) // 载入界面，需要直接删除载入界面进入主界面
+            asm volatile(
+                "movl 0x6A9EC0, %%ecx;"
+                "movl $0x452cb0, %%eax;"
+                "call *%%eax;"
+                :
+                :
+                : "ecx", "eax");
+
+        asm volatile( // 删除主界面
+            "movl 0x6a9ec0, %%esi;"
+            "movl $0x44f9e0, %%eax;"
+            "call *%%eax;"
+            :
+            :
+            : "esi", "eax");
+    }
+    if (gameUi == 7)  // 选项卡界面
+        asm volatile( // 删除选项卡界面
+            "movl 0x6a9ec0, %%esi;"
+            "movl $0x44fd00, %%eax;"
+            "call *%%eax;"
+            :
+            :
+            : "esi", "eax");
+    // 进入战斗或者选卡界面
+    bool ok = 1;
+    asm volatile(
+        "push %[ok];"
+        "pushl %[gameMode];"
+        "movl 0x6a9ec0, %%esi;"
+        "movl $0x44f560, %%eax;"
+        "call *%%eax;"
+        :
+        : [ok] "rm"(ok), [gameMode] "rm"(gameMode)
+        : "esi", "eax");
 }
 
 #endif //!__ASM_FUNC_H__
