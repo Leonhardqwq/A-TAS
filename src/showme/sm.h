@@ -29,8 +29,7 @@ public:
     // 得到场地物品信息显示设置
     SMShowObj<APlaceItem>& GetPlaceItemSettings() { return placeItem; }
 
-    void Start()
-    {
+    void Start() {
 #if __AVZ_VERSION__ < 240113
         ATickRunner::Start([this] {
 #else
@@ -73,7 +72,7 @@ public:
                 }
             }
         },
-            false);
+            ATickRunner::PAINT);
     }
 
 protected:
