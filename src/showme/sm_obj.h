@@ -198,7 +198,7 @@ inline SMShowObj<AZombie>::SMShowObj() {
     _infoFunc = [=](AZombie* zombie) {
         std::string text;
         text += std::format("{}\n", _nameDict[zombie->Type()]);
-        text += std::format("HP:{}\n", zombie->Hp());
+        text += std::format("HP:{}{}{}\n", zombie->Hp(), zombie->OneHp() ? std::format("+{}", zombie->OneHp()) : "", zombie->TwoHp() ? std::format("+{}", zombie->TwoHp()) : "");
         return text;
     };
     _nameDict = {

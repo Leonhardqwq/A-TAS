@@ -3,7 +3,7 @@
 // 本辅助工具目前版本使用的键控注入框架应使用AvZ2 2.9.0 20260224版本，源码不保证对更旧版本AvZ的兼容性
 
 #define UNICODE
-#define A_TAS_VERSION 202603050122
+#define A_TAS_VERSION 202603120248
 #include "AsmFunc.h"
 #include "Draw.h"
 #include "asm_insert_code/asm_insert_code.h"
@@ -97,6 +97,9 @@ struct {
     bool JackExplosionRange = true;
     bool TotalHP = true;
     bool ShowSpeed = true;
+    bool CobColPreview = true;
+    bool ActivationTime = true;
+    int MarkerDuration = 300;
     bool VBEStat = true;
 
     // Display Color
@@ -124,6 +127,14 @@ struct {
     uint32_t ShowSpeedARGB1 = 0xFFFF0000;
     uint32_t ShowSpeedARGB2 = 0xFF00FF00;
     uint32_t VBEStatARGB = 0xFFFFFFFF;
+
+    uint32_t PMarkerARGB = 0xFFFFA000;
+    uint32_t IMarkerARGB = 0xFF00A0FF;
+    uint32_t NMarkerARGB = 0xFF353535;
+    uint32_t AMarkerARGB = 0xFFC00000;
+    uint32_t JMarkerARGB = 0xFFFF0040;
+    uint32_t WMarkerARGB = 0xFFA0B060;
+    uint32_t MMarkerARGB = 0xFFDAC060;
 
     // Spawn
     bool Types[26] = {};
@@ -970,10 +981,27 @@ int RealCountdown() {
     return AGetMainObject()->RefreshCountdown();
 }
 
-// 显示信息，-1 = 关闭，0 = 基础，1 = 进阶
-// 这段逻辑最后更改的时间为20250313，确保血条覆盖顺序
-static int ShowInfoState = -1;
+// 自制时钟
 std::vector<int> WaveClock(40, 0);
+ATime Now;
+void WaveClockUpdate() {
+    if (AGetMainObject() == nullptr)
+        return;
+    if (RealCountdown())
+        WaveClock[AGetMainObject()->Wave()] = AGetMainObject()->GameClock() + RealCountdown();
+
+    Now.wave = AGetMainObject()->Wave() ?: 1;
+    if (AGetMainObject()->Wave() == 0)
+        Now.time = -AGetMainObject()->RefreshCountdown();
+    else if (WaveClock[AGetMainObject()->Wave() - 1] == 0)
+        Now.time = ANowTime(ANowWave());
+    else
+        Now.time = AGetMainObject()->GameClock() - WaveClock[AGetMainObject()->Wave() - 1];
+}
+
+// 显示信息，-1 = 关闭，0 = 基础，1 = 进阶
+// 这段逻辑最后更改的时间为20260305
+static int ShowInfoState = -1;
 void DrawInfo() {
     if (AGetMainObject() == nullptr)
         return; // 防崩溃代码
@@ -1165,8 +1193,6 @@ void DrawInfo() {
     }
 
     // 本波总血条
-    if (RealCountdown())
-        WaveClock[AGetMainObject()->Wave()] = AGetMainObject()->GameClock() + RealCountdown();
     if (settings.TotalHP) {
         if (AGetMainObject()->Wave() == 0)
             barPainter.Draw(ABar(58, 574, 1, 0, {}, 1, ABar::RIGHT, 127, 24, settings.TotalHPARGB1, 0xC0FFFFFF));
@@ -1215,6 +1241,13 @@ void DrawInfo() {
         fightInfoPainter.Draw(AText("x", 39, 575), 0xFF000000);
     }
 
+    // 落点预览
+    if (settings.CobColPreview && AGetMainObject()->MouseAttribution()->Type() == 8) {
+        backgroundPainter.Draw(ARect(AGetMainObject()->MouseAttribution()->MRef<int>(0x8) + 1, AGetMainObject()->MouseAttribution()->MRef<int>(0xC) + 22, 49, 14), 0xC0FFFFFF);
+        fightInfoPainter.Draw(AText(std::format("{}.", ((AGetMainObject()->MouseAttribution()->MRef<int>(0x8) + 25) / 80) < 10 ? std::format("{}", (AGetMainObject()->MouseAttribution()->MRef<int>(0x8) + 25) / 80) : "X"), AGetMainObject()->MouseAttribution()->MRef<int>(0x8), AGetMainObject()->MouseAttribution()->MRef<int>(0xC) + 18), 0xFF000000);
+        fightInfoPainter.Draw(AText(std::format("{:04}", ((AGetMainObject()->MouseAttribution()->MRef<int>(0x8) + 25) % 80 * 125)), AGetMainObject()->MouseAttribution()->MRef<int>(0x8) + 13, AGetMainObject()->MouseAttribution()->MRef<int>(0xC) + 18), 0xFF000000);
+    }
+
     // 罐子统计
     if (settings.VBEStat && AMRef<int>(0x6A9EC0, 0x7F8) == AAsm::SCARY_POTTER_ENDLESS) {
         std::vector<int> VBStat(13, 0);
@@ -1256,7 +1289,7 @@ void DrawInfo() {
 }
 
 // 显示栈位，-1 = 关闭，0 = 前场，1 = 全部
-// 这段逻辑最后更改的时间为20241221，修正了玉米炮对显栈区左扩的影响
+// 这段逻辑最后更改的时间为20260305
 static int ShowIndexState = -1;
 static std::vector<int> LeftmostVisibleArea(6, 10);
 void DrawIndex() {
@@ -1350,6 +1383,90 @@ void DrawIndex() {
         nextIndexPainter.Draw(AText(std::format("{}", AGetMainObject()->PlantNext()), 618, 2), 0xFF000000);
     }
 }
+
+static std::unordered_map<AGrid, int> MarkerList;
+class ActivationMarker : public ATickRunnerWithNoStart, public AOrderedEnterFightHook<-1> {
+protected:
+    int textDuration;
+    std::unordered_set<AProjectile*> projectiles;
+
+    void CobProjectile() {
+        if (!settings.ActivationTime)
+            return;
+        std::unordered_set<AProjectile*> currentProjectiles;
+        for (auto& p : AObjSelector(&AProjectile::Type, 11)) {
+            currentProjectiles.insert(&p);
+        }
+        for (auto p : projectiles) {
+            if (!currentProjectiles.contains(p)) {
+                int row = p->CobTargetRow();
+                float col = p->CobTargetAbscissa() / 80.0f - 0.5;
+                int Offset = MarkerList[{row + 1, int(col) + 1}] % 4 * 15;
+                fightInfoPainter.Draw(ARect(MyColToX(int(col) + 1) + 4, MyRowToY(row + 1, int(col) + 1) + 9 + Offset, 72, 14), settings.PMarkerARGB, settings.MarkerDuration);
+                fightInfoPainter.Draw(AText(std::format("{:<4}  {:02}", Now.time + 1, (p->CobTargetAbscissa()) % 80 * 125 / 100), MyColToX(int(col) + 1) + 3, MyRowToY(row + 1, int(col) + 1) + 5 + Offset), 0xFFFFFFFF, 0x0, settings.MarkerDuration);
+                fightInfoPainter.Draw(AText(std::format("{}.", ((p->CobTargetAbscissa()) / 80) < 10 ? std::format("{}", (p->CobTargetAbscissa()) / 80) : "X"), MyColToX(int(col) + 1) + 44, MyRowToY(row + 1, int(col) + 1) + 5 + Offset), 0xFFFFFFFF, 0x0, settings.MarkerDuration);
+                ++MarkerList[{row + 1, int(col) + 1}];
+            }
+        }
+        projectiles = std::move(currentProjectiles);
+    }
+    virtual void _EnterFight() override {
+        projectiles.clear();
+        for (auto& lst : MarkerList)
+            lst.second = 0;
+    }
+
+    // void Plant::DoSpecial()
+    static void __stdcall AsmCallBack0x4666A0(AAsmCodeContext* context) {
+        if (!settings.ActivationTime)
+            return;
+        APlant* plant = *(APlant**)(context->esp + 4);
+        if (!plant)
+            return;
+        std::map<APlantType, uint32_t> plant_colors = {
+            {AICE_SHROOM, settings.IMarkerARGB},
+            {ADOOM_SHROOM, settings.NMarkerARGB},
+            {ACHERRY_BOMB, settings.AMarkerARGB},
+            {AJALAPENO, settings.JMarkerARGB},
+            {APOTATO_MINE, settings.MMarkerARGB},
+            // {ABLOVER, 0xFF00A000},
+            // {ACOFFEE_BEAN, 0x00000000},
+            // {AUMBRELLA_LEAF, 0x00000000},
+        };
+        auto colors = plant_colors.find(static_cast<APlantType>(plant->Type()));
+        if (colors == plant_colors.end())
+            return;
+        int Offset = MarkerList[{plant->Row() + 1, plant->Col() + 1}] % 4 * 15;
+        fightInfoPainter.Draw(ARect(plant->Xi() + 4, plant->Yi() + 9 + Offset, 72, 14), colors->second, settings.MarkerDuration);
+        fightInfoPainter.Draw(AText(std::format("{:<4}  00", Now.time + 1), plant->Xi() + 3, plant->Yi() + 5 + Offset), 0xFFFFFFFF, 0x0, settings.MarkerDuration);
+        fightInfoPainter.Draw(AText(std::format("{}.", plant->Col() + 1), plant->Xi() + 44, plant->Yi() + 5 + Offset), 0xFFFFFFFF, 0x0, settings.MarkerDuration);
+        ++MarkerList[{plant->Row() + 1, plant->Col() + 1}];
+    }
+
+    // void Plant::DoSquashDamage()
+    static void __stdcall AsmCallBack0x4606F0(AAsmCodeContext* context) {
+        if (!settings.ActivationTime)
+            return;
+        APlant* plant = *(APlant**)(context->esp + 4);
+        if (!plant)
+            return;
+        int Offset = MarkerList[{plant->Row() + 1, plant->Col() + 1}] % 4 * 15;
+        fightInfoPainter.Draw(ARect(MyColToX(plant->Col() + 1) + 4, MyRowToY(plant->Row() + 1, plant->Col() + 1) + 9 + Offset, 72, 14), settings.WMarkerARGB, settings.MarkerDuration);
+        fightInfoPainter.Draw(AText(std::format("{:<4}  {:02}", Now.time + 1, (plant->Abscissa() + 40) % 80 * 125 / 100), MyColToX(plant->Col() + 1) + 3, MyRowToY(plant->Row() + 1, plant->Col() + 1) + 5 + Offset), 0xFFFFFFFF, 0x0, settings.MarkerDuration);
+        fightInfoPainter.Draw(AText(std::format("{}.", ((plant->Abscissa() + 40) / 80) < 10 ? std::format("{}", (plant->Abscissa() + 40) / 80) : "X"), MyColToX(plant->Col() + 1) + 44, MyRowToY(plant->Row() + 1, plant->Col() + 1) + 5 + Offset), 0xFFFFFFFF, 0x0, settings.MarkerDuration);
+        ++MarkerList[{plant->Row() + 1, plant->Col() + 1}];
+    }
+
+public:
+    ActivationMarker(int textDuration = 300)
+        : textDuration(textDuration) {}
+
+    void Start() {
+        ATickRunnerWithNoStart::_Start([this]() { CobProjectile(); }, ONLY_FIGHT);
+        AInsertUniqueAsmCode(0x4666A0, AsmCallBack0x4666A0);
+        AInsertUniqueAsmCode(0x4606F0, AsmCallBack0x4606F0);
+    }
+};
 
 // 六路种植相关代码
 // 鼠标座标转换成格子
@@ -2127,7 +2244,7 @@ void CreateSpecialGroup(AWindow* window, int LeftEdge, int TopEdge) {
 
     int y = TopEdge;
     int x = LeftEdge;
-    window->AddLabel("", x, y, 4 * (SPACE + WIDTH) + SPACE, (SPACE + HEIGHT) * 2);
+    window->AddLabel("", x, y, 4 * (SPACE + WIDTH) + SPACE, (SPACE + HEIGHT));
 
     x += SPACE;
     window->AddLabel("特殊功能", x, y, WIDTH * 2 + SPACE, HEIGHT);
@@ -2250,6 +2367,7 @@ void CreateShowInfoGroup(AWindow* window, int LeftEdge, int TopEdge) {
     // 下一列
     x += WIDTH + SPACE;
     y = TopEdge;
+
     auto PlantOffsetBox = window->AddCheckBox("小喷偏移", x, y, BTNWIDTH, HEIGHT);
     PlantOffsetBox->SetCheck(settings.PlantOffset);
     PlantOffsetBox->Connect([=] { settings.PlantOffset = PlantOffsetBox->GetCheck(); });
@@ -2325,10 +2443,61 @@ void CreateShowInfoGroup(AWindow* window, int LeftEdge, int TopEdge) {
     auto ShowSpeedARGB1Edit = window->AddEdit(std::format("{:08X}", settings.ShowSpeedARGB1), x + BTNWIDTH, y, EDITWIDTH, HEIGHT, ES_CENTER);
     auto ShowSpeedARGB2Edit = window->AddEdit(std::format("{:08X}", settings.ShowSpeedARGB2), x + BTNWIDTH + SPACE + EDITWIDTH, y, EDITWIDTH, HEIGHT, ES_CENTER);
 
-    x = LeftEdge + SPACE + 305;
+    // 下一列
+    x += WIDTH + SPACE;
     y = TopEdge;
 
-    auto ApplyAllBtn = window->AddPushButton("一键改色", x, y, BTNWIDTH, HEIGHT);
+    auto CobColPreviewBox = window->AddCheckBox("落点预览", x, y, BTNWIDTH, HEIGHT);
+    CobColPreviewBox->SetCheck(settings.CobColPreview);
+    CobColPreviewBox->Connect([=] { settings.CobColPreview = CobColPreviewBox->GetCheck(); });
+
+    // 下一列
+    x += WIDTH + SPACE;
+    y = TopEdge;
+
+    auto ActivationTimeBox = window->AddCheckBox(std::format("生效时机显示{}s", settings.MarkerDuration / 100.0f), x, y, BTNWIDTH + EDITWIDTH - HEIGHT - HEIGHT, HEIGHT);
+    ActivationTimeBox->SetCheck(settings.ActivationTime);
+    ActivationTimeBox->Connect([=] { settings.ActivationTime = ActivationTimeBox->GetCheck(); });
+
+    auto DecreaseMarkerDurationBtn = window->AddPushButton("-", x + BTNWIDTH + EDITWIDTH - HEIGHT - HEIGHT, y, HEIGHT, HEIGHT);
+    DecreaseMarkerDurationBtn->Connect([=] {
+        settings.MarkerDuration = settings.MarkerDuration - 10 >= 0 ? settings.MarkerDuration - 10 : 0;
+        ActivationTimeBox->SetText(std::format("生效时机显示{}s", settings.MarkerDuration / 100.0f));
+    });
+    auto IncreaseMarkerDurationBtn = window->AddPushButton("+", x + BTNWIDTH + EDITWIDTH - HEIGHT, y, HEIGHT, HEIGHT);
+    IncreaseMarkerDurationBtn->Connect([=] {
+        settings.MarkerDuration += 10;
+        ActivationTimeBox->SetText(std::format("生效时机显示{}s", settings.MarkerDuration / 100.0f));
+    });
+
+    y += SPACE + HEIGHT;
+    window->AddLabel("炮生效背景", x, y, BTNWIDTH, HEIGHT);
+    auto PMarkerARGBEdit = window->AddEdit(std::format("{:08X}", settings.PMarkerARGB), x + BTNWIDTH, y, EDITWIDTH, HEIGHT, ES_CENTER);
+    y += SPACE + HEIGHT;
+    window->AddLabel("冰生效背景", x, y, BTNWIDTH, HEIGHT);
+    auto IMarkerARGBEdit = window->AddEdit(std::format("{:08X}", settings.IMarkerARGB), x + BTNWIDTH, y, EDITWIDTH, HEIGHT, ES_CENTER);
+    y += SPACE + HEIGHT;
+    window->AddLabel("核生效背景", x, y, BTNWIDTH, HEIGHT);
+    auto NMarkerARGBEdit = window->AddEdit(std::format("{:08X}", settings.NMarkerARGB), x + BTNWIDTH, y, EDITWIDTH, HEIGHT, ES_CENTER);
+    y += SPACE + HEIGHT;
+    window->AddLabel("樱生效背景", x, y, BTNWIDTH, HEIGHT);
+    auto AMarkerARGBEdit = window->AddEdit(std::format("{:08X}", settings.AMarkerARGB), x + BTNWIDTH, y, EDITWIDTH, HEIGHT, ES_CENTER);
+    y += SPACE + HEIGHT;
+    window->AddLabel("辣生效背景", x, y, BTNWIDTH, HEIGHT);
+    auto JMarkerARGBEdit = window->AddEdit(std::format("{:08X}", settings.JMarkerARGB), x + BTNWIDTH, y, EDITWIDTH, HEIGHT, ES_CENTER);
+    y += SPACE + HEIGHT;
+    window->AddLabel("窝生效背景", x, y, BTNWIDTH, HEIGHT);
+    auto WMarkerARGBEdit = window->AddEdit(std::format("{:08X}", settings.WMarkerARGB), x + BTNWIDTH, y, EDITWIDTH, HEIGHT, ES_CENTER);
+    y += SPACE + HEIGHT;
+    window->AddLabel("雷生效背景", x, y, BTNWIDTH, HEIGHT);
+    auto MMarkerARGBEdit = window->AddEdit(std::format("{:08X}", settings.MMarkerARGB), x + BTNWIDTH, y, EDITWIDTH, HEIGHT, ES_CENTER);
+
+    // x = LeftEdge + SPACE + 5 * (WIDTH + SPACE);
+
+    x += BTNWIDTH;
+    y = TopEdge + 10 * (SPACE + HEIGHT);
+
+    auto ApplyAllBtn = window->AddPushButton("一键改色", x, y, EDITWIDTH, HEIGHT);
     ApplyAllBtn->Connect([=] {
         settings.ProduceCDARGB = HexToUL(ProduceCDARGBEdit->GetText(), settings.ProduceCDARGB);
         settings.CobCDARGB = HexToUL(CobCDARGBEdit->GetText(), settings.CobCDARGB);
@@ -2354,6 +2523,14 @@ void CreateShowInfoGroup(AWindow* window, int LeftEdge, int TopEdge) {
         settings.TotalHPARGB2 = HexToUL(TotalHPARGB2Edit->GetText(), settings.TotalHPARGB2);
         settings.ShowSpeedARGB1 = HexToUL(ShowSpeedARGB1Edit->GetText(), settings.ShowSpeedARGB1);
         settings.ShowSpeedARGB2 = HexToUL(ShowSpeedARGB2Edit->GetText(), settings.ShowSpeedARGB2);
+
+        settings.PMarkerARGB = HexToUL(PMarkerARGBEdit->GetText(), settings.PMarkerARGB);
+        settings.IMarkerARGB = HexToUL(IMarkerARGBEdit->GetText(), settings.IMarkerARGB);
+        settings.NMarkerARGB = HexToUL(NMarkerARGBEdit->GetText(), settings.NMarkerARGB);
+        settings.AMarkerARGB = HexToUL(AMarkerARGBEdit->GetText(), settings.AMarkerARGB);
+        settings.JMarkerARGB = HexToUL(JMarkerARGBEdit->GetText(), settings.JMarkerARGB);
+        settings.WMarkerARGB = HexToUL(WMarkerARGBEdit->GetText(), settings.WMarkerARGB);
+        settings.MMarkerARGB = HexToUL(MMarkerARGBEdit->GetText(), settings.MMarkerARGB);
         Info("所有颜色设置已保存");
     });
 }
@@ -3513,7 +3690,6 @@ AOnEnterFight({
     } else {
         tickShowMe.Stop();
     }
-
     for (size_t i = 0; i < keyHandles.size(); ++i)
         keyHandles[i].Stop();
     for (size_t i = 0; i < keyHandles.size(); ++i)
@@ -3537,7 +3713,7 @@ AOnExitFight({
 // ALogger<AConsole> ConsoleLogger;
 
 // 不进家
-void __stdcall AsmCallBackEnterHousePause(AAsmCodeContext* context) {
+void __stdcall AsmCallBack0x413400(AAsmCodeContext* context) {
     if (!settings.EnterHousePause)
         return;
     context->eip = 0x4138C9;
@@ -3546,6 +3722,8 @@ void __stdcall AsmCallBackEnterHousePause(AAsmCodeContext* context) {
     ASetAdvancedPause(Paused, false, 0);
     CreateCaption("The Zombies Ate Your Brains!", {BOTTOMFAST, 1000});
 }
+
+ActivationMarker ActivationMarker;
 
 // 主体
 void AScript() {
@@ -3556,7 +3734,7 @@ void AScript() {
     AMaidCheats::Phase() = MaidPhase;
 
     // 不进家
-    AInsertUniqueAsmCode(0x413400, AsmCallBackEnterHousePause);
+    AInsertUniqueAsmCode(0x413400, AsmCallBack0x413400);
 
     fightInfoPainter.SetFontSize(17); // 波数时间，僵尸计数
     lowIndexPainter.SetFont("Arial");
@@ -3568,7 +3746,9 @@ void AScript() {
 
     tickFight.Start([=] { DanceCheat(); JackPause(); BalloonPause(); });
     tickPainter.Start([=] { DrawInfo(); DrawIndex(); }, ATickRunner::PAINT);
-    tickGlobal.Start([=] { SmartRemove(); BalloonCaption(); }, ATickRunner::GLOBAL);
+    tickGlobal.Start([=] { WaveClockUpdate(); SmartRemove(); BalloonCaption(); }, ATickRunner::GLOBAL);
+
+    ActivationMarker.Start();
 
     for (size_t i = 0; i < keyHandles.size(); ++i)
         keyHandles[i].Stop();

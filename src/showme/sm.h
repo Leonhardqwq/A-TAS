@@ -40,6 +40,8 @@ public:
             int mouseY = mouseWindow->MouseOrdinate();
             int txtPos = -1;
 
+            painter.SetFontSize(17);
+
             // Plant
             if (!plant.IsPaused()) {
                 auto showInfo = plant.GetShowText(mouseX, mouseY);
