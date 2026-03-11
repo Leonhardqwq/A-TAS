@@ -3,7 +3,7 @@
 // 本辅助工具目前版本使用的键控注入框架应使用AvZ2 20250225版本，源码不保证对更旧版本AvZ的兼容性
 
 #define UNICODE
-#define A_TAS_VERSION 202504260310
+#define A_TAS_VERSION 202504262322
 #include "AsmFunc.h"
 #include "Draw.h"
 #include "dsl.h"
@@ -41,15 +41,63 @@ ATickRunner tickPainter;
 // 全局运行的tickRunner
 ATickRunner tickGlobal;
 
-constexpr auto SETTINGS_PATH = "settings.ini";
+constexpr auto KEYBINDINGS_FILENAME = "keybindings.ini";
 constexpr auto GAME_DATA_PATH = "C:/ProgramData/PopCap Games/PlantsVsZombies/userdata/";
 
-static std::array<const char*, 33> btnLabels = {"一键辅助", "减速一档", "加速一档", "0.25倍速", "10倍速", "跳到某波", "退出重进", "回档几帧", "高级暂停", "下一帧", "智能用卡", "卡槽置顶", "显示信息", "显示栈位", "智能铲除", "Dance快", "Dance慢", "女仆召唤", "女仆停滞", "女仆前进", "女仆解除", "自动收集", "小丑拦截", "气球拦截", "风炮修复", "隐藏UI", "跳过动画", "拍照模式", "视角上移", "视角下移", "视角左移", "视角右移", "PvZ初始化"};
-// 初始按键
+// 预设按键
 static std::array<std::string, 33> keyDefaults = {"A", "1", "2", "C", "R", "T", "F5", "BACKSPACE", "Z", "X", "SHIFT", "V", "G", "B", "H", "Q", "W", "S", "D", "F", "E", "I", "J", "Y", "N", "U", "L", "P", "UP", "DOWN", "LEFT", "RIGHT", "O"};
+static std::array<const char*, 33> btnLabels = {"一键辅助", "减速一档", "加速一档", "0.25倍速", "10倍速", "跳到某波", "退出重进", "回档几帧", "高级暂停", "下一帧", "智能用卡", "卡槽置顶", "显示信息", "显示栈位", "智能铲除", "Dance快", "Dance慢", "女仆召唤", "女仆停滞", "女仆前进", "女仆解除", "自动收集", "小丑拦截", "气球拦截", "风炮修复", "隐藏UI", "跳过动画", "拍照模式", "视角上移", "视角下移", "视角左移", "视角右移", "PvZ初始化"};
 static std::array<std::string, 33> keyBindings;
 static std::array<AEdit*, 33> keyEdits;
-static AEdit* SpeedGearsEdit;
+
+// 预设设置
+struct {
+    // General
+    char SpeedGears[256];
+    int WavelengthRecord = 3;
+    int SkipTickWave = 0;
+    int ReadOnly = -1;
+
+    // Replay
+    bool AutoRecordOnGameStart = true;
+    bool ShowMouse = true;
+    bool AutoStop = true;
+    bool Interpolate = true;
+    bool ShowReplayInfo = true;
+    int recordTickInterval = 10;
+    int tickRewindCount = 1;
+    char savePath[256];
+
+    // Display
+    bool ShowMe = true;
+    bool CobCD = true;
+    bool PlantOffset = true;
+    bool CobGloomHP = true;
+    bool LilyPotHP = true;
+    bool PumpkinHP = true;
+    bool NutSpikeHP = true;
+    bool OtherPlantHP = true;
+    bool Crater = true;
+    bool Icetrail = true;
+    bool HPStyle = false;
+    bool GigaStat = true;
+    bool GigaHP = true;
+    bool GigaCount = true;
+    bool GargHP = true;
+    bool ZomboniCount = true;
+    bool FootballHP = true;
+    bool FootballCount = true;
+    bool JackCountdown = true;
+    bool JackExplosionRange = true;
+    bool TotalHP = true;
+    bool ShowSpeed = true;
+
+    // Spawn
+    bool Types[26] = {};
+    bool ZombieList = false;
+    bool AverageRowSpawn = false;
+    bool RandomType = false;
+} settings;
 
 // 得到本工具的路径
 const std::string& GetToolPath() {
@@ -61,7 +109,6 @@ const std::string& GetToolPath() {
     if (handle == INVALID_HANDLE_VALUE) {
         return toolPath;
     }
-
     // 枚举进程模块
     MODULEENTRY32W info;
     info.dwSize = sizeof(MODULEENTRY32W);
@@ -83,32 +130,55 @@ const std::string& GetToolPath() {
     return toolPath;
 }
 
-bool SaveSettings() {
-    auto filePath = std::filesystem::path(SETTINGS_PATH);
-    std::ofstream outFile(filePath.c_str());
+std::mutex mtx;
+
+void SaveSettings() {
+    if (!isInitSuccess) {
+        return;
+    }
+    // 这里可能会导致线程不安全
+    std::lock_guard lk(mtx);
+    std::ofstream outFile(GetToolPath() + "/settings.dat", std::ios::out | std::ios::binary);
+    outFile.write((char*)&settings, sizeof(settings));
+    outFile.close();
+}
+
+void LoadSettings() {
+    std::ifstream inFile(GetToolPath() + "/settings.dat", std::ios::in | std::ios::binary);
+    if (!inFile) {
+        return;
+    }
+    inFile.read((char*)&settings, sizeof(settings));
+    inFile.close();
+}
+
+class EnsureSaveSettings {
+public:
+    ~EnsureSaveSettings() { SaveSettings(); }
+} __; // 全局对象的析构函数确保调用 SaveSettings
+
+bool SaveKeybindings() {
+    if (!isInitSuccess)
+        return false;
+    // 这里可能会导致线程不安全
+    std::lock_guard lk(mtx);
+    std::ofstream outFile(GetToolPath() + "/" + KEYBINDINGS_FILENAME, std::ios::out | std::ios::binary);
     if (outFile.is_open()) {
         outFile << "A_TAS_VERSION:" << A_TAS_VERSION << std::endl;
-        for (int i = 0; i < btnLabels.size(); ++i) {
+        for (int i = 0; i < btnLabels.size(); ++i)
             outFile << btnLabels[i] << ":" << keyEdits[i]->GetText() << std::endl;
-        }
-        outFile << SpeedGearsText << ":";
-        for (const auto& speed : SpeedGearsVec) {
-            outFile << std::format("{:.2f}", speed) + " ";
-        }
         outFile.close();
         return true;
     }
     return false;
 }
 
-bool LoadSettings() {
-    std::ifstream file(SETTINGS_PATH);
-    if (!file.is_open()) {
+bool LoadKeybindings() {
+    std::ifstream inFile(GetToolPath() + "/" + KEYBINDINGS_FILENAME, std::ios::in | std::ios::binary);
+    if (!inFile.is_open())
         return false;
-    }
-
     std::string line;
-    while (std::getline(file, line)) {
+    while (std::getline(inFile, line)) {
         std::istringstream iss(line);
         std::string key;
         std::string value;
@@ -120,15 +190,10 @@ bool LoadSettings() {
                     auto i = std::distance(btnLabels.begin(), it);
                     keyBindings[i] = value;
                 }
-            } else if (key == SpeedGearsText) {
-                value.clear();
-                if (std::getline(iss, value) && !value.empty()) {
-                    SpeedGearsStr = value;
-                }
             }
         }
     }
-    file.close();
+    inFile.close();
     return true;
 }
 
@@ -813,81 +878,18 @@ int RealCountdown() {
     return AGetMainObject()->RefreshCountdown();
 }
 
-struct {
-    int WavelengthRecord = 3;
-    int SkipTickWave = 0;
-    int ReadOnly = -1;
-
-    // Replay
-    int recordTickInterval = 10;
-    int tickRewindCount = 1;
-    char savePath[1000];
-
-    // Key
-    AKey keyRecord = 'Q';
-    AKey keyPlay = 'W';
-    AKey keyPause = 'E';
-    AKey keyStop = 'S';
-
-} state;
-
-struct {
-    // Replay
-    bool AutoRecordOnGameStart = true;
-    bool ShowMouse = true;
-    bool AutoStop = true;
-    bool Interpolate = true;
-    bool ShowTips = true;
-
-    // Display
-    bool ShowMe = true;
-
-    bool CobCD = true;
-    bool PlantOffset = true;
-
-    bool CobGloomHP = true;
-    bool LilyPotHP = true;
-    bool PumpkinHP = true;
-    bool NutSpikeHP = true;
-    bool OtherPlantHP = true;
-
-    bool Crater = true;
-    bool Icetrail = true;
-
-    bool HPStyle = false;
-    bool GigaStat = true;
-
-    bool GigaHP = true;
-    bool GigaCount = true;
-    bool GargHP = true;
-    bool ZomboniCount = true;
-    bool FootballHP = true;
-    bool FootballCount = true;
-    bool JackCountdown = true;
-    bool JackExplosionRange = true;
-
-    bool TotalHP = true;
-    bool ShowSpeed = true;
-
-    // Spawn
-    bool Types[26] = {0, 0, 0, 1, 0, 1, 0, 0, 1, 0, 0, 1, 1, 0, 0, 1, 0, 0, 1, 1, 0, 0, 0, 0, 0, 0};
-    bool ZombieList = false;
-    bool AverageRowSpawn = false;
-    bool RandomType = false;
-} checkbox;
-
 // 显示信息，-1 = 关闭，0 = 基础，1 = 进阶
 // 这段逻辑最后更改的时间为20250313，确保血条覆盖顺序
 static int ShowInfoState = -1;
 void DrawInfo() {
     // if (AGetMainObject() == nullptr)
     //     return; // 防崩溃代码
-    if (checkbox.ShowTips && aReplay.GetState() == AReplay::RECORDING) {
+    if (settings.ShowReplayInfo && aReplay.GetState() == AReplay::RECORDING) {
         barPainter.Draw(ABar(685, 3, 1, 0, {}, 1, ABar::RIGHT, 106, 24, 0xFFFFC000, 0xC0FFFFFF));
         fightInfoPainter.Draw(AText("Rec.", 689, 4), 0xFFFF0000);
         fightInfoPainter.Draw(AText(std::to_string(aReplay.GetRecordIdx()), 733, 4), 0xFFFF0000);
     }
-    if (checkbox.ShowTips && aReplay.GetState() == AReplay::PLAYING) {
+    if (settings.ShowReplayInfo && aReplay.GetState() == AReplay::PLAYING) {
         barPainter.Draw(ABar(685, 3, 1, 0, {}, 1, ABar::RIGHT, 106, 24, 0xFFFFC000, 0xC0FFFFFF));
         fightInfoPainter.Draw(AText("Play", 689, 4), 0xFF0000FF);
         fightInfoPainter.Draw(AText(std::to_string(aReplay.GetPlayIdx() + 1), 733, 4), 0xFF0000FF);
@@ -895,45 +897,45 @@ void DrawInfo() {
     if (ShowInfoState == -1)
         return;
     for (auto& Plant : aAlivePlantFilter) { // 显血
-        if (Plant.Type() == ACOB_CANNON && AGetCobRecoverTime(Plant.Index()) && checkbox.CobCD)
+        if (Plant.Type() == ACOB_CANNON && AGetCobRecoverTime(Plant.Index()) && settings.CobCD)
             barPainter.Draw(ABar(Plant.Xi() + 4, Plant.Yi() + 17, 3475, 3475 - AGetCobRecoverTime(Plant.Index()), {350, 3350}, 1, ABar::RIGHT, 152, 7, 0xFFFFFF00, 0xA0FFFFFF));
         if (Plant.Hp() != Plant.HpMax()) {
             if (Plant.Type() == ACOB_CANNON) {
-                if (checkbox.CobGloomHP)
+                if (settings.CobGloomHP)
                     barPainter.Draw(ABar(Plant.Xi() + 4, Plant.Yi() + 25, Plant.HpMax(), Plant.Hp(), {}, 1, ABar::RIGHT, 152, 11, 0xFF4CAF50, 0xA0FFFFFF));
             } else if (Plant.Type() == AGLOOM_SHROOM) {
-                if (checkbox.CobGloomHP)
+                if (settings.CobGloomHP)
                     barPainter.Draw(ABar(Plant.Xi() + 4, Plant.Yi() + 25, Plant.HpMax(), Plant.Hp(), {}, 1, ABar::RIGHT, 72, 11, 0xFF4CAF50, 0xA0FFFFFF));
             } else if (Plant.Type() == ACOFFEE_BEAN) {
-                if (checkbox.OtherPlantHP)
+                if (settings.OtherPlantHP)
                     barPainter.Draw(ABar(Plant.Xi() + 4, Plant.Yi() + 13, Plant.HpMax(), Plant.Hp(), {}, 1, ABar::RIGHT, 72, 11, 0xFF965821, 0xA0FFFFFF));
             } else if (ARangeIn(Plant.Type(), {AWALL_NUT, ATALL_NUT, ASPIKEROCK})) {
-                if (checkbox.NutSpikeHP)
+                if (settings.NutSpikeHP)
                     barPainter.Draw(ABar(Plant.Xi() + 4, Plant.Yi() + 25, Plant.HpMax(), Plant.Hp(), {Plant.HpMax() / 3, Plant.HpMax() * 2 / 3}, 1, ABar::RIGHT, 72, 11, 0xFF4CAF50, 0xA0FFFFFF));
             } else if (Plant.Type() == APUMPKIN) {
-                if (checkbox.PumpkinHP)
+                if (settings.PumpkinHP)
                     barPainter.Draw(ABar(Plant.Xi() + 4, Plant.Yi() + 45, Plant.HpMax(), Plant.Hp(), {Plant.HpMax() / 3, Plant.HpMax() * 2 / 3}, 1, ABar::RIGHT, 72, 11, 0xFFFFA500, 0xA0FFFFFF));
             } else if (ARangeIn(Plant.Type(), {ALILY_PAD, AFLOWER_POT})) {
-                if (checkbox.LilyPotHP)
+                if (settings.LilyPotHP)
                     barPainter.Draw(ABar(Plant.Xi() + 4, Plant.Yi() + 57, Plant.HpMax(), Plant.Hp(), {}, 1, ABar::RIGHT, 72, 11, 0xFF4CAF50, 0xA0FFFFFF));
             } else if (Plant.Type() == ASQUASH) {
-                if (checkbox.OtherPlantHP)
+                if (settings.OtherPlantHP)
                     barPainter.Draw(ABar(Plant.Xi() + 4, Plant.Yi() + 25, Plant.HpMax(), Plant.Hp(), {}, 1, ABar::RIGHT, 72, 11, 0xFF4CAF50, 0xA0FFFFFF));
             } else {
-                if (checkbox.OtherPlantHP)
+                if (settings.OtherPlantHP)
                     barPainter.Draw(ABar(MyColToX(Plant.Col() + 1) + 4, MyRowToY(Plant.Row() + 1, Plant.Col() + 1) + 25, Plant.HpMax(), Plant.Hp(), {}, 1, ABar::RIGHT, 72, 11, 0xFF4CAF50, 0xA0FFFFFF));
             }
         }
     }
     for (auto& Place : aAlivePlaceItemFilter) { // 核坑
-        if (Place.Type() != 2 || !checkbox.Crater)
+        if (Place.Type() != 2 || !settings.Crater)
             continue;
         auto Coordinate = MyGridToCoordinate(Place.Row() + 1, Place.Col() + 1);
         int Abscissa = Coordinate.first, Ordinate = Coordinate.second;
         barPainter.Draw(ABar(Abscissa + 4, Ordinate + 62, 18000, Place.Value(), {}, 1, ABar::RIGHT, 72, 6, 0xFF965821, 0xA0FFFFFF, 0xFF000000, 0));
     }
     for (int Row = 1; Row <= 6; ++Row) { // 冰道
-        if (LeftmostIceTrail(Row) > 9 || !checkbox.Icetrail)
+        if (LeftmostIceTrail(Row) > 9 || !settings.Icetrail)
             continue;
         auto Coordinate = MyGridToCoordinate(Row, LeftmostIceTrail(Row));
         int Abscissa = Coordinate.first, Ordinate = Coordinate.second;
@@ -946,7 +948,7 @@ void DrawInfo() {
     // 确保血条覆盖顺序，故多次遍历
     for (auto& Zombie : aAliveZombieFilter) {
         if (Zombie.Type() == AFOOTBALL_ZOMBIE && Zombie.Hp() >= 90) { // 橄榄血条
-            if (checkbox.FootballHP)
+            if (settings.FootballHP)
                 barPainter.Draw(ABar(Zombie.Abscissa() + 81, Zombie.Ordinate() + 69, 1580, Zombie.OneHp() + Zombie.Hp() - 90, {180}, 1, ABar::UP, 36, 6, 0xFF6D706C, 0xA0FFFFFF));
             ++FootballCount[Zombie.Row()]; // 橄榄实时统计
             if (Zombie.AtWave() == AGetMainObject()->Wave() - 1)
@@ -960,15 +962,15 @@ void DrawInfo() {
     }
     for (auto& Zombie : aAliveZombieFilter) {
         if (Zombie.Type() == AGARGANTUAR) // 白眼血条
-            if (checkbox.GargHP)
-                barPainter.Draw(ABar(Zombie.Abscissa() + 49, Zombie.Ordinate() + 59, 3000, Zombie.Hp(), checkbox.HPStyle ? std::initializer_list<int> {1200} : std::initializer_list<int> {1500, 1800}, 1, ABar::UP, 40, 8, 0xFF9868BC, 0xA0FFFFFF));
+            if (settings.GargHP)
+                barPainter.Draw(ABar(Zombie.Abscissa() + 49, Zombie.Ordinate() + 59, 3000, Zombie.Hp(), settings.HPStyle ? std::initializer_list<int> {1200} : std::initializer_list<int> {1500, 1800}, 1, ABar::UP, 40, 8, 0xFF9868BC, 0xA0FFFFFF));
     }
     std::vector<int> GigaThisWave(6, 0);
     std::vector<int> GigaCount(6, 0);
     for (auto& Zombie : aAliveZombieFilter) {
         if (Zombie.Type() == AGIGA_GARGANTUAR) { // 红眼血条
-            if (checkbox.GigaHP)
-                barPainter.Draw(ABar(Zombie.Abscissa() + 49, Zombie.Ordinate() + 79, 6000, Zombie.Hp(), checkbox.HPStyle ? std::initializer_list<int> {600, 2400, 4200} : std::initializer_list<int> {1800, 3000, 4800}, 1, ABar::UP, 80, 8, 0xFFFF0000, 0xA0FFFFFF));
+            if (settings.GigaHP)
+                barPainter.Draw(ABar(Zombie.Abscissa() + 49, Zombie.Ordinate() + 79, 6000, Zombie.Hp(), settings.HPStyle ? std::initializer_list<int> {600, 2400, 4200} : std::initializer_list<int> {1800, 3000, 4800}, 1, ABar::UP, 80, 8, 0xFFFF0000, 0xA0FFFFFF));
             ++GigaCount[Zombie.Row()]; // 红眼实时统计
             if (Zombie.AtWave() == AGetMainObject()->Wave() - 1)
                 ++GigaThisWave[Zombie.Row()];
@@ -977,7 +979,7 @@ void DrawInfo() {
     for (auto& Plant : aAlivePlantFilter) {
         // 受炸提示，打印一个与植物血条重合的半透明红色矩形，包括飞行窝瓜和咖啡豆
         for (auto& Zombie : aAliveZombieFilter) {
-            if (Zombie.Type() == AJACK_IN_THE_BOX_ZOMBIE && Zombie.State() == 16 && JudgeExplode(&Plant, &Zombie) && checkbox.JackExplosionRange) {
+            if (Zombie.Type() == AJACK_IN_THE_BOX_ZOMBIE && Zombie.State() == 16 && JudgeExplode(&Plant, &Zombie) && settings.JackExplosionRange) {
                 if (Plant.Type() == ACOB_CANNON)
                     backgroundPainter.Draw(ARect(Plant.Xi() + 4, Plant.Yi() + 25, 152, 11), 0x9AFF0000);
                 else if (Plant.Type() == ACOFFEE_BEAN)
@@ -994,8 +996,10 @@ void DrawInfo() {
             }
         }
         // 小喷菇阳光菇海蘑菇偏移
+        if (!settings.PlantOffset)
+            continue;
         int RectHeight = 11;
-        if (ShowInfoState >= 0 && Plant.Hp() < Plant.HpMax())
+        if (Plant.Hp() < Plant.HpMax() || !settings.OtherPlantHP)
             RectHeight = 0;
         int Plantoffset = Plant.Xi() - MyColToX(Plant.Col() + 1);
         if (Plantoffset > 0) {
@@ -1009,7 +1013,7 @@ void DrawInfo() {
     }
     // 有小丑开盒，绘制爆炸倒计时
     for (auto& Zombie : aAliveZombieFilter) {
-        if (Zombie.Type() == AJACK_IN_THE_BOX_ZOMBIE && Zombie.State() == 16 && checkbox.JackCountdown)
+        if (Zombie.Type() == AJACK_IN_THE_BOX_ZOMBIE && Zombie.State() == 16 && settings.JackCountdown)
             barPainter.Draw(ABar(Zombie.Abscissa() + 65, Zombie.Ordinate() + 87, 110, Zombie.StateCountdown(), {100}, 1, ABar::UP, 55, 10, 0xFFFF69B4, 0xA0FFFFFF));
     }
     for (int Row : {0, 1, 2, 3, 4, 5}) {
@@ -1018,17 +1022,17 @@ void DrawInfo() {
         int Height = 16;
         auto Coordinate = MyGridToCoordinate(Row + 1, 0.5);
         int Ordinate = Coordinate.second;
-        if (GigaCount[Row] && checkbox.GigaCount) { // 红眼实时统计绘制
+        if (GigaCount[Row] && settings.GigaCount) { // 红眼实时统计绘制
             std::string Giga = std::to_string(GigaThisWave[Row]) + "/" + std::to_string(GigaCount[Row]);
             backgroundPainter.Draw(ARect(0, Ordinate + aFieldInfo.rowHeight / 2 + 3 - Height, Giga.size() * 9 + 2, 16), 0xFFFF0000);
             fightInfoPainter.Draw(AText(Giga, 0, Ordinate + aFieldInfo.rowHeight / 2 - Height), 0xFFFFFFFF);
         }
-        if (ZomboniCount[Row] && checkbox.ZomboniCount) { // 冰车实时统计绘制
+        if (ZomboniCount[Row] && settings.ZomboniCount) { // 冰车实时统计绘制
             std::string Zomboni = std::to_string(ZomboniThisWave[Row]) + "/" + std::to_string(ZomboniCount[Row]);
             backgroundPainter.Draw(ARect(0, Ordinate + aFieldInfo.rowHeight / 2 + 3, Zomboni.size() * 9 + 2, 16), 0xFF0040FF);
             fightInfoPainter.Draw(AText(Zomboni, 0, Ordinate + aFieldInfo.rowHeight / 2), 0xFFFFFFFF);
         }
-        if (FootballCount[Row] && checkbox.FootballCount) { // 橄榄实时统计绘制
+        if (FootballCount[Row] && settings.FootballCount) { // 橄榄实时统计绘制
             std::string Football = std::to_string(FootballThisWave[Row]) + "/" + std::to_string(FootballCount[Row]);
             backgroundPainter.Draw(ARect(0, Ordinate + aFieldInfo.rowHeight / 2 + 3 + Height, Football.size() * 9 + 2, 16), 0xFF6D706C);
             fightInfoPainter.Draw(AText(Football, 0, Ordinate + aFieldInfo.rowHeight / 2 + Height), 0xFFFFFFFF);
@@ -1048,7 +1052,7 @@ void DrawInfo() {
         GigaARGB = 0xFF0000FF;
         GigaBGARGB = 0xFF9868BC;
     }
-    if (GigaCumulativeDistribution[20 - 1] && checkbox.GigaStat) { // 红眼出怪表统计绘制
+    if (GigaCumulativeDistribution[20 - 1] && settings.GigaStat) { // 红眼出怪表统计绘制
         backgroundPainter.Draw(ARect(19, 7, 61, 53), GigaBGARGB);
         if (AGetMainObject()->Wave()) {
             std::string Wave = "Wave";
@@ -1075,7 +1079,7 @@ void DrawInfo() {
         }
     }
     // 本波总血条
-    if (checkbox.TotalHP) {
+    if (settings.TotalHP) {
         if (AGetMainObject()->Wave() < 1)
             barPainter.Draw(ABar(58, 574, 1, 0, {}, 1, ABar::RIGHT, 127, 24, 0xFF9868BC, 0xC0FFFFFF));
         else if (ARangeIn(AGetMainObject()->Wave(), {9, 19, 20}) || ShowInfoState)
@@ -1088,7 +1092,7 @@ void DrawInfo() {
         fightInfoPainter.Draw(AText(RealCountdown() && (ARangeIn(AGetMainObject()->Wave(), {9, 19, 20}) || ShowInfoState) ? std::to_string(-RealCountdown()) : "", 145, 575), 0xFFFF0000);
     }
     // 波长记录
-    for (int i = 0; i < state.WavelengthRecord; ++i) {
+    for (int i = 0; i < settings.WavelengthRecord; ++i) {
         if (AGetMainObject()->Wave() - i > 0 && ANowTime(ANowWave() - i) > 0 && RealCountdown() && (ARangeIn(AGetMainObject()->Wave(), {9, 19, 20}) || ShowInfoState)) {
             barPainter.Draw(ABar(191 + 71 * i, 574, 1, 0, {}, 1, ABar::RIGHT, 65, 24, 0xFFFFC000, 0xC0FFFFFF));
             fightInfoPainter.Draw(AText((AGetMainObject()->Wave() - i < 10 ? "0" : "") + std::to_string(AGetMainObject()->Wave() - i ?: 1) + ",", 193 + 71 * i, 575), 0xFF0000FF);
@@ -1100,7 +1104,7 @@ void DrawInfo() {
         }
     }
     // 显示倍速
-    if (AGetPvzBase()->TickMs() != 10 && checkbox.ShowSpeed) {
+    if (AGetPvzBase()->TickMs() != 10 && settings.ShowSpeed) {
         barPainter.Draw(ABar(6, 574, 1, 1, {}, 1, ABar::RIGHT, 46, 24, AGetPvzBase()->TickMs() > 10 ? 0xFFFF0000 : 0xFF00FF00));
         fightInfoPainter.Draw(AText(std::to_string(10 / AGetPvzBase()->TickMs()), 8, 575), 0xFF000000);
         if (AGetPvzBase()->TickMs() == 1) {
@@ -1149,45 +1153,45 @@ void DrawIndex() {
             int SizeOffset = 1;
             int FontSize = 2;
             if (Plant.Type() == ACOB_CANNON)
-                SegPainter.Draw(A7Seg(Plant.Index(), Plant.Xi() + 110 + DigitOffset + SizeOffset, Plant.Yi() + 26 + SizeOffset, FontSize, 1, 2), SizeOffset + 1, 0xFF0040FF, 0xFF4CAF50, checkbox.CobGloomHP ? RectHeight : 11);
+                SegPainter.Draw(A7Seg(Plant.Index(), Plant.Xi() + 110 + DigitOffset + SizeOffset, Plant.Yi() + 26 + SizeOffset, FontSize, 1, 2), SizeOffset + 1, 0xFF0040FF, 0xFF4CAF50, settings.CobGloomHP ? RectHeight : 11);
             else if (Plant.Type() == AGLOOM_SHROOM)
-                SegPainter.Draw(A7Seg(Plant.Index(), Plant.Xi() + 30 + DigitOffset + SizeOffset, Plant.Yi() + 26 + SizeOffset, FontSize, 1, 2), SizeOffset + 1, 0xFF0040FF, 0xFF4CAF50, checkbox.CobGloomHP ? RectHeight : 11);
+                SegPainter.Draw(A7Seg(Plant.Index(), Plant.Xi() + 30 + DigitOffset + SizeOffset, Plant.Yi() + 26 + SizeOffset, FontSize, 1, 2), SizeOffset + 1, 0xFF0040FF, 0xFF4CAF50, settings.CobGloomHP ? RectHeight : 11);
             else if (Plant.Type() == ACOFFEE_BEAN)
-                SegPainter.Draw(A7Seg(Plant.Index(), Plant.Xi() + 30 + DigitOffset + SizeOffset, Plant.Yi() + 14 + SizeOffset, FontSize, 1, 2), SizeOffset + 1, 0xFFFFFFFF, 0xFF965821, checkbox.OtherPlantHP ? RectHeight : 11);
+                SegPainter.Draw(A7Seg(Plant.Index(), Plant.Xi() + 30 + DigitOffset + SizeOffset, Plant.Yi() + 14 + SizeOffset, FontSize, 1, 2), SizeOffset + 1, 0xFFFFFFFF, 0xFF965821, settings.OtherPlantHP ? RectHeight : 11);
             else if (ARangeIn(Plant.Type(), {AWALL_NUT, ATALL_NUT, ASPIKEROCK}))
-                SegPainter.Draw(A7Seg(Plant.Index(), Plant.Xi() + 30 + DigitOffset + SizeOffset, Plant.Yi() + 26 + SizeOffset, FontSize, 1, 2), SizeOffset + 1, 0xFF0040FF, 0xFF4CAF50, checkbox.NutSpikeHP ? RectHeight : 11);
+                SegPainter.Draw(A7Seg(Plant.Index(), Plant.Xi() + 30 + DigitOffset + SizeOffset, Plant.Yi() + 26 + SizeOffset, FontSize, 1, 2), SizeOffset + 1, 0xFF0040FF, 0xFF4CAF50, settings.NutSpikeHP ? RectHeight : 11);
             else if (Plant.Type() == APUMPKIN)
-                SegPainter.Draw(A7Seg(Plant.Index(), Plant.Xi() + 54 + DigitOffset + SizeOffset, Plant.Yi() + 46 + SizeOffset, FontSize, 1, 2), SizeOffset + 1, 0xFF0040FF, 0xFFFFA500, checkbox.PumpkinHP ? RectHeight : 11);
+                SegPainter.Draw(A7Seg(Plant.Index(), Plant.Xi() + 54 + DigitOffset + SizeOffset, Plant.Yi() + 46 + SizeOffset, FontSize, 1, 2), SizeOffset + 1, 0xFF0040FF, 0xFFFFA500, settings.PumpkinHP ? RectHeight : 11);
             else if (ARangeIn(Plant.Type(), {ALILY_PAD, AFLOWER_POT}))
-                SegPainter.Draw(A7Seg(Plant.Index(), Plant.Xi() + 6 + DigitOffset + SizeOffset, Plant.Yi() + 58 + SizeOffset, FontSize, 1, 2), SizeOffset + 1, 0xFF0040FF, 0xFF4CAF50, checkbox.LilyPotHP ? RectHeight : 11);
+                SegPainter.Draw(A7Seg(Plant.Index(), Plant.Xi() + 6 + DigitOffset + SizeOffset, Plant.Yi() + 58 + SizeOffset, FontSize, 1, 2), SizeOffset + 1, 0xFF0040FF, 0xFF4CAF50, settings.LilyPotHP ? RectHeight : 11);
             else if (Plant.Type() == ASQUASH)
-                SegPainter.Draw(A7Seg(Plant.Index(), Plant.Xi() + 30 + DigitOffset + SizeOffset, Plant.Yi() + 26 + SizeOffset, FontSize, 1, 2), SizeOffset + 1, 0xFF0040FF, 0xFF4CAF50, checkbox.OtherPlantHP ? RectHeight : 11);
+                SegPainter.Draw(A7Seg(Plant.Index(), Plant.Xi() + 30 + DigitOffset + SizeOffset, Plant.Yi() + 26 + SizeOffset, FontSize, 1, 2), SizeOffset + 1, 0xFF0040FF, 0xFF4CAF50, settings.OtherPlantHP ? RectHeight : 11);
             else
-                SegPainter.Draw(A7Seg(Plant.Index(), MyColToX(Plant.Col() + 1) + 30 + DigitOffset + SizeOffset, MyRowToY(Plant.Row() + 1, Plant.Col() + 1) + 26 + SizeOffset, FontSize, 1, 2), SizeOffset + 1, 0xFF0040FF, 0xFF4CAF50, checkbox.OtherPlantHP ? RectHeight : 11);
+                SegPainter.Draw(A7Seg(Plant.Index(), MyColToX(Plant.Col() + 1) + 30 + DigitOffset + SizeOffset, MyRowToY(Plant.Row() + 1, Plant.Col() + 1) + 26 + SizeOffset, FontSize, 1, 2), SizeOffset + 1, 0xFF0040FF, 0xFF4CAF50, settings.OtherPlantHP ? RectHeight : 11);
         } else { // 可栈位垫，9像素黑色Arial
             if (Plant.Type() == ACOB_CANNON) {
-                backgroundPainter.Draw(ARect(Plant.Xi() + 109 + DigitOffset, Plant.Yi() + 25, RectWidth, checkbox.CobGloomHP ? RectHeight : 11), 0xFF4CAF50);
+                backgroundPainter.Draw(ARect(Plant.Xi() + 109 + DigitOffset, Plant.Yi() + 25, RectWidth, settings.CobGloomHP ? RectHeight : 11), 0xFF4CAF50);
                 lowIndexPainter.Draw(AText(std::to_string(Plant.Index()), Plant.Xi() + 108 + DigitOffset, Plant.Yi() + 21), 0xFF000000);
             } else if (Plant.Type() == AGLOOM_SHROOM) {
-                backgroundPainter.Draw(ARect(Plant.Xi() + 29 + DigitOffset, Plant.Yi() + 25, RectWidth, checkbox.CobGloomHP ? RectHeight : 11), 0xFF4CAF50);
+                backgroundPainter.Draw(ARect(Plant.Xi() + 29 + DigitOffset, Plant.Yi() + 25, RectWidth, settings.CobGloomHP ? RectHeight : 11), 0xFF4CAF50);
                 lowIndexPainter.Draw(AText(std::to_string(Plant.Index()), Plant.Xi() + 28 + DigitOffset, Plant.Yi() + 21), 0xFF000000);
             } else if (Plant.Type() == ACOFFEE_BEAN) {
-                backgroundPainter.Draw(ARect(Plant.Xi() + 29 + DigitOffset, Plant.Yi() + 13, RectWidth, checkbox.OtherPlantHP ? RectHeight : 11), 0xFF965821);
+                backgroundPainter.Draw(ARect(Plant.Xi() + 29 + DigitOffset, Plant.Yi() + 13, RectWidth, settings.OtherPlantHP ? RectHeight : 11), 0xFF965821);
                 lowIndexPainter.Draw(AText(std::to_string(Plant.Index()), Plant.Xi() + 28 + DigitOffset, Plant.Yi() + 9), 0xFFFFFFFF);
             } else if (ARangeIn(Plant.Type(), {AWALL_NUT, ATALL_NUT, ASPIKEROCK})) {
-                backgroundPainter.Draw(ARect(Plant.Xi() + 29 + DigitOffset, Plant.Yi() + 25, RectWidth, checkbox.NutSpikeHP ? RectHeight : 11), 0xFF4CAF50);
+                backgroundPainter.Draw(ARect(Plant.Xi() + 29 + DigitOffset, Plant.Yi() + 25, RectWidth, settings.NutSpikeHP ? RectHeight : 11), 0xFF4CAF50);
                 lowIndexPainter.Draw(AText(std::to_string(Plant.Index()), Plant.Xi() + 28 + DigitOffset, Plant.Yi() + 21), 0xFF000000);
             } else if (Plant.Type() == APUMPKIN) {
-                backgroundPainter.Draw(ARect(Plant.Xi() + 53 + DigitOffset, Plant.Yi() + 45, RectWidth, checkbox.PumpkinHP ? RectHeight : 11), 0xFFFFA500);
+                backgroundPainter.Draw(ARect(Plant.Xi() + 53 + DigitOffset, Plant.Yi() + 45, RectWidth, settings.PumpkinHP ? RectHeight : 11), 0xFFFFA500);
                 lowIndexPainter.Draw(AText(std::to_string(Plant.Index()), Plant.Xi() + 52 + DigitOffset, Plant.Yi() + 41), 0xFF000000);
             } else if (ARangeIn(Plant.Type(), {ALILY_PAD, AFLOWER_POT})) {
-                backgroundPainter.Draw(ARect(Plant.Xi() + 5 + DigitOffset, Plant.Yi() + 57, RectWidth, checkbox.LilyPotHP ? RectHeight : 11), 0xFF4CAF50);
+                backgroundPainter.Draw(ARect(Plant.Xi() + 5 + DigitOffset, Plant.Yi() + 57, RectWidth, settings.LilyPotHP ? RectHeight : 11), 0xFF4CAF50);
                 lowIndexPainter.Draw(AText(std::to_string(Plant.Index()), Plant.Xi() + 4 + DigitOffset, Plant.Yi() + 53), 0xFF000000);
             } else if (Plant.Type() == ASQUASH) {
-                backgroundPainter.Draw(ARect(Plant.Xi() + 29 + DigitOffset, Plant.Yi() + 25, RectWidth, checkbox.OtherPlantHP ? RectHeight : 11), 0xFF4CAF50);
+                backgroundPainter.Draw(ARect(Plant.Xi() + 29 + DigitOffset, Plant.Yi() + 25, RectWidth, settings.OtherPlantHP ? RectHeight : 11), 0xFF4CAF50);
                 lowIndexPainter.Draw(AText(std::to_string(Plant.Index()), Plant.Xi() + 28 + DigitOffset, Plant.Yi() + 21), 0xFF000000);
             } else {
-                backgroundPainter.Draw(ARect(MyColToX(Plant.Col() + 1) + 29 + DigitOffset, MyRowToY(Plant.Row() + 1, Plant.Col() + 1) + 25, RectWidth, checkbox.OtherPlantHP ? RectHeight : 11), 0xFF4CAF50);
+                backgroundPainter.Draw(ARect(MyColToX(Plant.Col() + 1) + 29 + DigitOffset, MyRowToY(Plant.Row() + 1, Plant.Col() + 1) + 25, RectWidth, settings.OtherPlantHP ? RectHeight : 11), 0xFF4CAF50);
                 lowIndexPainter.Draw(AText(std::to_string(Plant.Index()), MyColToX(Plant.Col() + 1) + 28 + DigitOffset, MyRowToY(Plant.Row() + 1, Plant.Col() + 1) + 21), 0xFF000000);
             }
         }
@@ -1218,9 +1222,9 @@ static bool ATASSwitch = false;
 // 10倍速
 void Speed10x() { AGetPvzBase()->TickMs() = AGetPvzBase()->TickMs() == 1 ? 10 : 1; }
 // 跳到某波
-void SkiptoWave() { ASkipTick(state.SkipTickWave, 0); }
+void SkiptoWave() { ASkipTick(settings.SkipTickWave, 0); }
 // 退出重进
-void ReStart() {
+void Restart() {
     ABackToMain();
     AEnterGame(AMRef<int>(0x6A9EC0, 0x7F8));
 }
@@ -1231,7 +1235,7 @@ void func8() {
     Paused = true;
     PausedSlowed = false;
     ASetAdvancedPause(Paused, false, 0);
-    aReplay.ShowOneTick(aReplay.GetEndIdx() - state.tickRewindCount >= 0 ? aReplay.GetRecordIdx() - state.tickRewindCount : aReplay.GetStartIdx());
+    aReplay.ShowOneTick(aReplay.GetEndIdx() - settings.tickRewindCount >= 0 ? aReplay.GetRecordIdx() - settings.tickRewindCount : aReplay.GetStartIdx());
 }
 // 高级暂停
 void func9() {
@@ -1409,9 +1413,8 @@ void ResetGame() {
 
 // UI
 std::array<AConnectHandle, 33> keyHandles;
-std::array<AOperation, 33> funcs = {OneKeySwitch, Decelerate, Accelerate, ResetSpeed, Speed10x, SkiptoWave, ReStart, func8, func9, func10, SmartAsh, func13, func14, func15, func16, func17, func18, func19, func20, func21, func22, func23, func24, func25, func26, func27, func28, func30, func31, func32, func33, func34, ResetGame};
+std::array<AOperation, 33> funcs = {OneKeySwitch, Decelerate, Accelerate, ResetSpeed, Speed10x, SkiptoWave, Restart, func8, func9, func10, SmartAsh, func13, func14, func15, func16, func17, func18, func19, func20, func21, func22, func23, func24, func25, func26, func27, func28, func30, func31, func32, func33, func34, ResetGame};
 std::array<APushButton*, 33> keyButtons;
-ALabel* SpeedGearsLabel;
 
 ALabel* infoLabel = nullptr;
 void Info(const std::string& tip) {
@@ -1515,38 +1518,12 @@ std::string OpenFileDialog(const std::string& initPath) {
     return result;
 }
 
-std::pair<AEdit*, APushButton*> CreateEditButton(AWindow* window, const std::string& labelText, const std::string& editText, const std::string& btnText, int x, int y) {
-    int SPACE = 10;
-    auto label = window->AddLabel(labelText, x, y);
-    x += SPACE + label->GetWidth();
-    auto edit = window->AddEdit(editText, x, y, 100, 30);
-    x += SPACE + edit->GetWidth();
-    auto btn = window->AddPushButton(btnText, x, y);
-    return {edit, btn};
-}
-
-template <typename Func>
-void CreateNumberButton(AWindow* window, const std::string& labelText, float& number, const std::string& btnText, int x, int y, Func&& func) {
-    std::stringstream ss;
-    ss << number;
-    auto [edit, btn] = CreateEditButton(window, labelText, ss.str(), btnText, x, y);
-    AConnect(btn, [&number, edit = edit, func = std::forward<Func>(func)] mutable {
-        try {
-            auto val = std::stof(edit->GetText());
-            number = val;
-            func(val);
-        } catch (std::exception& exce) {
-            Warning(std::string("捕获到 C++ 标准异常: ") + exce.what());
-        }
-    });
-}
-
-static constexpr int MAIN_WIDTH = 640;
-static constexpr int MAIN_HEIGHT = 480;
+constexpr static int MAIN_WIDTH = 640;
+constexpr static int MAIN_HEIGHT = 480;
 
 AMainWindow mainWindow("A-TAS 4.0 " + std::to_string(A_TAS_VERSION), MAIN_WIDTH, MAIN_HEIGHT);
 
-// 回放配置
+// 回放函数
 struct {
     AOperation startPlayOp = [] {
         FightUiCheck();
@@ -1554,9 +1531,9 @@ struct {
             Warning("正在播放");
             return;
         }
-        if (checkbox.AutoStop)
+        if (settings.AutoStop)
             aReplay.Stop();
-        auto fileName = OpenFileDialog(state.savePath);
+        auto fileName = OpenFileDialog(settings.savePath);
         if (fileName.empty())
             return;
         compressor->SetFilePath(fileName);
@@ -1569,10 +1546,10 @@ struct {
             Warning("正在录制");
             return;
         }
-        if (checkbox.AutoStop)
+        if (settings.AutoStop)
             aReplay.Stop();
-        compressor->SetFilePath(state.savePath + std::string("/") + GetCurTimeStr() + ".7z");
-        aReplay.StartRecord(std::round(state.recordTickInterval));
+        compressor->SetFilePath(settings.savePath + std::string("/") + GetCurTimeStr() + ".7z");
+        aReplay.StartRecord(std::round(settings.recordTickInterval));
         Info("Replay : 开始录制");
     };
     AOperation pauseOp = [] {
@@ -1587,11 +1564,11 @@ struct {
     };
 } replayOp;
 
-constexpr int SPACE = 5;
-constexpr int WIDTH = 100;
-constexpr int HEIGHT = 25;
-
 void CreateReplayGroup(AWindow* window, int LeftEdge, int TopEdge) {
+    constexpr static int SPACE = 5;
+    constexpr static int WIDTH = 100;
+    constexpr static int HEIGHT = 25;
+
     int y = TopEdge;
     int x = LeftEdge;
     window->AddLabel("", x, y, 4 * (SPACE + WIDTH) + SPACE, (SPACE + HEIGHT) * 6);
@@ -1600,9 +1577,9 @@ void CreateReplayGroup(AWindow* window, int LeftEdge, int TopEdge) {
     window->AddLabel("回放:    必须录制才能回档", x, y, WIDTH * 2 + SPACE, HEIGHT);
     x += (SPACE + WIDTH) * 2;
     auto autoRecordBox = window->AddCheckBox("游戏开始时自动录制", x, y, WIDTH * 2, HEIGHT);
-    autoRecordBox->SetCheck(checkbox.AutoRecordOnGameStart);
+    autoRecordBox->SetCheck(settings.AutoRecordOnGameStart);
 
-    autoRecordBox->Connect([=] { checkbox.AutoRecordOnGameStart = autoRecordBox->GetCheck(); });
+    autoRecordBox->Connect([=] { settings.AutoRecordOnGameStart = autoRecordBox->GetCheck(); });
 
     // 下一行
     y += SPACE + HEIGHT;
@@ -1617,8 +1594,8 @@ void CreateReplayGroup(AWindow* window, int LeftEdge, int TopEdge) {
     x += SPACE + WIDTH;
     auto stopBtn = window->AddPushButton("⏹️停止", x, y, WIDTH, HEIGHT);
 
-    startRecordBtn->Connect(replayOp.startRecordOp);
     startPlayBtn->Connect(replayOp.startPlayOp);
+    startRecordBtn->Connect(replayOp.startRecordOp);
     pauseBtn->Connect(replayOp.pauseOp);
     stopBtn->Connect(replayOp.stopOp);
 
@@ -1628,30 +1605,30 @@ void CreateReplayGroup(AWindow* window, int LeftEdge, int TopEdge) {
 
     x += SPACE;
     auto showMouseBox = window->AddCheckBox("显示鼠标", x, y, WIDTH, HEIGHT);
-    showMouseBox->SetCheck(checkbox.ShowMouse);
+    showMouseBox->SetCheck(settings.ShowMouse);
     x += SPACE + WIDTH;
     auto autoStopBox = window->AddCheckBox("切换时停止", x, y, WIDTH, HEIGHT);
-    autoStopBox->SetCheck(checkbox.AutoStop);
+    autoStopBox->SetCheck(settings.AutoStop);
     x += SPACE + WIDTH;
     auto interpolateBox = window->AddCheckBox("播放时补帧", x, y, WIDTH, HEIGHT);
-    interpolateBox->SetCheck(checkbox.Interpolate);
+    interpolateBox->SetCheck(settings.Interpolate);
     x += SPACE + WIDTH;
     auto tipBox = window->AddCheckBox("回放信息栏", x, y, WIDTH, HEIGHT);
-    tipBox->SetCheck(checkbox.ShowTips);
+    tipBox->SetCheck(settings.ShowReplayInfo);
 
     showMouseBox->Connect([=] {
-        checkbox.ShowMouse = showMouseBox->GetCheck();
-        aReplay.SetMouseVisible(checkbox.ShowMouse);
+        settings.ShowMouse = showMouseBox->GetCheck();
+        aReplay.SetMouseVisible(settings.ShowMouse);
     });
     autoStopBox->Connect([=] {
-        checkbox.AutoStop = autoStopBox->GetCheck();
+        settings.AutoStop = autoStopBox->GetCheck();
     });
     interpolateBox->Connect([=] {
-        checkbox.Interpolate = interpolateBox->GetCheck();
-        aReplay.SetInterpolate(checkbox.Interpolate);
+        settings.Interpolate = interpolateBox->GetCheck();
+        aReplay.SetInterpolate(settings.Interpolate);
     });
     tipBox->Connect([=] {
-        checkbox.ShowTips = tipBox->GetCheck();
+        settings.ShowReplayInfo = tipBox->GetCheck();
     });
 
     // 下一行
@@ -1661,7 +1638,7 @@ void CreateReplayGroup(AWindow* window, int LeftEdge, int TopEdge) {
     x += SPACE;
     window->AddLabel("存档精度(每隔多少cs存一次档):", x, y, WIDTH * 2 + SPACE, HEIGHT);
     x += (SPACE + WIDTH) * 2;
-    auto tickIntervalEdit = window->AddEdit(std::to_string(state.recordTickInterval), x, y, WIDTH, HEIGHT, ES_NUMBER | ES_CENTER);
+    auto tickIntervalEdit = window->AddEdit(std::to_string(settings.recordTickInterval), x, y, WIDTH, HEIGHT, ES_NUMBER | ES_CENTER);
     x += SPACE + WIDTH;
     auto tickIntervalBtn = window->AddPushButton("设置", x, y, WIDTH, HEIGHT);
     tickIntervalBtn->Connect([=] {
@@ -1674,7 +1651,7 @@ void CreateReplayGroup(AWindow* window, int LeftEdge, int TopEdge) {
             Warning("精度最小为 1 帧");
             tickInterval = 1;
         }
-        state.recordTickInterval = tickInterval;
+        settings.recordTickInterval = tickInterval;
         Info("设置存档精度成功");
     });
 
@@ -1685,7 +1662,7 @@ void CreateReplayGroup(AWindow* window, int LeftEdge, int TopEdge) {
     x += SPACE;
     window->AddLabel("回档个数(每按一次要回几个档):", x, y, WIDTH * 2 + SPACE, HEIGHT);
     x += (SPACE + WIDTH) * 2;
-    auto tickRewindCountEdit = window->AddEdit(std::to_string(state.tickRewindCount), x, y, WIDTH, HEIGHT, ES_NUMBER | ES_CENTER);
+    auto tickRewindCountEdit = window->AddEdit(std::to_string(settings.tickRewindCount), x, y, WIDTH, HEIGHT, ES_NUMBER | ES_CENTER);
     x += SPACE + WIDTH;
     auto tickRewindCountBtn = window->AddPushButton("设置", x, y, WIDTH, HEIGHT);
     tickRewindCountBtn->Connect([=] {
@@ -1694,7 +1671,7 @@ void CreateReplayGroup(AWindow* window, int LeftEdge, int TopEdge) {
             Warning("个数最小为 1 个");
             tickRewindCount = 1;
         }
-        state.tickRewindCount = tickRewindCount;
+        settings.tickRewindCount = tickRewindCount;
         Info("设置回档个数成功");
     });
 
@@ -1705,25 +1682,28 @@ void CreateReplayGroup(AWindow* window, int LeftEdge, int TopEdge) {
     x += SPACE;
     window->AddLabel("保存路径:", x, y, WIDTH * 2 + SPACE, HEIGHT);
     x += SPACE + WIDTH;
-    auto savePathEdit = window->AddEdit(state.savePath, x, y, WIDTH * 2 + SPACE, HEIGHT, ES_AUTOHSCROLL);
-    savePathEdit->SetText(state.savePath);
+    auto savePathEdit = window->AddEdit(settings.savePath, x, y, WIDTH * 2 + SPACE, HEIGHT, ES_AUTOHSCROLL);
+    savePathEdit->SetText(settings.savePath);
     x += (SPACE + WIDTH) * 2;
     auto savePathBtn = window->AddPushButton("设置", x, y, WIDTH, HEIGHT);
     savePathBtn->Connect([=] {
         auto path = savePathEdit->GetText();
         __CheckASCII(path, Warning("您设置的保存路径: [" + path + "] 中含有非 ASCII 字符, 请将其设置为纯英文路径再次尝试");
-            savePathEdit->SetText(state.savePath), );
+            savePathEdit->SetText(settings.savePath), );
         if (!std::filesystem::exists(path)) {
             Warning("设置的路径: [" + path + "] 不存在");
-            savePathEdit->SetText(state.savePath);
+            savePathEdit->SetText(settings.savePath);
         } else {
-            std::strcpy(state.savePath, path.c_str());
+            std::strcpy(settings.savePath, path.c_str());
             Info("设置路径: [" + path + "] 成功");
         }
     });
 }
 
 void CreateShowInfoGroup(AWindow* window, int LeftEdge, int TopEdge) {
+    constexpr static int SPACE = 5;
+    constexpr static int WIDTH = 100;
+    constexpr static int HEIGHT = 25;
     constexpr static int BTNWIDTH = 75;
 
     int y = TopEdge;
@@ -1736,70 +1716,70 @@ void CreateShowInfoGroup(AWindow* window, int LeftEdge, int TopEdge) {
     y += SPACE + HEIGHT;
 
     auto CobCDBox = window->AddCheckBox("炮冷却条", x, y, BTNWIDTH, HEIGHT);
-    CobCDBox->SetCheck(checkbox.CobCD);
-    CobCDBox->Connect([=] { checkbox.CobCD = CobCDBox->GetCheck(); });
+    CobCDBox->SetCheck(settings.CobCD);
+    CobCDBox->Connect([=] { settings.CobCD = CobCDBox->GetCheck(); });
 
     y += SPACE + HEIGHT;
     auto CobGloomHPBox = window->AddCheckBox("炮曾血条", x, y, BTNWIDTH, HEIGHT);
-    CobGloomHPBox->SetCheck(checkbox.CobGloomHP);
-    CobGloomHPBox->Connect([=] { checkbox.CobGloomHP = CobGloomHPBox->GetCheck(); });
+    CobGloomHPBox->SetCheck(settings.CobGloomHP);
+    CobGloomHPBox->Connect([=] { settings.CobGloomHP = CobGloomHPBox->GetCheck(); });
 
     y += SPACE + HEIGHT;
     auto PumpkinHPBox = window->AddCheckBox("南瓜血条", x, y, BTNWIDTH, HEIGHT);
-    PumpkinHPBox->SetCheck(checkbox.PumpkinHP);
-    PumpkinHPBox->Connect([=] { checkbox.PumpkinHP = PumpkinHPBox->GetCheck(); });
+    PumpkinHPBox->SetCheck(settings.PumpkinHP);
+    PumpkinHPBox->Connect([=] { settings.PumpkinHP = PumpkinHPBox->GetCheck(); });
 
     y += SPACE + HEIGHT;
 
     auto OtherPlantHPBox = window->AddCheckBox("其他植物血条", x, y, 110, HEIGHT);
-    OtherPlantHPBox->SetCheck(checkbox.OtherPlantHP);
-    OtherPlantHPBox->Connect([=] { checkbox.OtherPlantHP = OtherPlantHPBox->GetCheck(); });
+    OtherPlantHPBox->SetCheck(settings.OtherPlantHP);
+    OtherPlantHPBox->Connect([=] { settings.OtherPlantHP = OtherPlantHPBox->GetCheck(); });
 
     y += SPACE + HEIGHT;
 
     auto CraterBox = window->AddCheckBox("核坑冷却", x, y, BTNWIDTH, HEIGHT);
-    CraterBox->SetCheck(checkbox.Crater);
-    CraterBox->Connect([=] { checkbox.Crater = CraterBox->GetCheck(); });
+    CraterBox->SetCheck(settings.Crater);
+    CraterBox->Connect([=] { settings.Crater = CraterBox->GetCheck(); });
 
     y += SPACE + HEIGHT;
     auto HPStyleBox = window->AddCheckBox("炮阵样式", x, y, BTNWIDTH, HEIGHT);
-    HPStyleBox->SetCheck(checkbox.HPStyle);
-    HPStyleBox->Connect([=] { checkbox.HPStyle = HPStyleBox->GetCheck(); });
+    HPStyleBox->SetCheck(settings.HPStyle);
+    HPStyleBox->Connect([=] { settings.HPStyle = HPStyleBox->GetCheck(); });
 
     y += SPACE + HEIGHT;
     auto GigaHPBox = window->AddCheckBox("红眼血条", x, y, BTNWIDTH, HEIGHT);
-    GigaHPBox->SetCheck(checkbox.GigaHP);
-    GigaHPBox->Connect([=] { checkbox.GigaHP = GigaHPBox->GetCheck(); });
+    GigaHPBox->SetCheck(settings.GigaHP);
+    GigaHPBox->Connect([=] { settings.GigaHP = GigaHPBox->GetCheck(); });
 
     y += SPACE + HEIGHT;
     auto GargHPBox = window->AddCheckBox("白眼血条", x, y, BTNWIDTH, HEIGHT);
-    GargHPBox->SetCheck(checkbox.GargHP);
-    GargHPBox->Connect([=] { checkbox.GargHP = GargHPBox->GetCheck(); });
+    GargHPBox->SetCheck(settings.GargHP);
+    GargHPBox->Connect([=] { settings.GargHP = GargHPBox->GetCheck(); });
 
     y += SPACE + HEIGHT;
     auto FootballHPBox = window->AddCheckBox("橄榄血条", x, y, BTNWIDTH, HEIGHT);
-    FootballHPBox->SetCheck(checkbox.FootballHP);
-    FootballHPBox->Connect([=] { checkbox.FootballHP = FootballHPBox->GetCheck(); });
+    FootballHPBox->SetCheck(settings.FootballHP);
+    FootballHPBox->Connect([=] { settings.FootballHP = FootballHPBox->GetCheck(); });
 
     y += SPACE + HEIGHT;
     auto JackCountdownBox = window->AddCheckBox("小丑炸条", x, y, BTNWIDTH, HEIGHT);
-    JackCountdownBox->SetCheck(checkbox.JackCountdown);
-    JackCountdownBox->Connect([=] { checkbox.JackCountdown = JackCountdownBox->GetCheck(); });
+    JackCountdownBox->SetCheck(settings.JackCountdown);
+    JackCountdownBox->Connect([=] { settings.JackCountdown = JackCountdownBox->GetCheck(); });
 
     y += SPACE + HEIGHT;
     auto TotalHPBox = window->AddCheckBox("本波总血条", x, y, 100, HEIGHT);
-    TotalHPBox->SetCheck(checkbox.TotalHP);
-    TotalHPBox->Connect([=] { checkbox.TotalHP = TotalHPBox->GetCheck(); });
+    TotalHPBox->SetCheck(settings.TotalHP);
+    TotalHPBox->Connect([=] { settings.TotalHP = TotalHPBox->GetCheck(); });
 
     // 下一列
     x = LeftEdge + SPACE * 2 + WIDTH;
     y = TopEdge;
 
     auto ShowMeBox = window->AddCheckBox("悬停显示", x, y, BTNWIDTH, HEIGHT);
-    ShowMeBox->SetCheck(checkbox.ShowMe);
+    ShowMeBox->SetCheck(settings.ShowMe);
     ShowMeBox->Connect([=] {
-        checkbox.ShowMe = ShowMeBox->GetCheck();
-        if (checkbox.ShowMe)
+        settings.ShowMe = ShowMeBox->GetCheck();
+        if (settings.ShowMe)
             tickShowMe.Start();
         else
             tickShowMe.Stop();
@@ -1807,63 +1787,64 @@ void CreateShowInfoGroup(AWindow* window, int LeftEdge, int TopEdge) {
 
     y += SPACE + HEIGHT;
     auto PlantOffsetBox = window->AddCheckBox("小喷偏移", x, y, BTNWIDTH, HEIGHT);
-    PlantOffsetBox->SetCheck(checkbox.PlantOffset);
-    PlantOffsetBox->Connect([=] { checkbox.PlantOffset = PlantOffsetBox->GetCheck(); });
+    PlantOffsetBox->SetCheck(settings.PlantOffset);
+    PlantOffsetBox->Connect([=] { settings.PlantOffset = PlantOffsetBox->GetCheck(); });
 
     y += SPACE + HEIGHT;
     auto LilyPotHPBox = window->AddCheckBox("荷盆血条", x, y, BTNWIDTH, HEIGHT);
-    LilyPotHPBox->SetCheck(checkbox.LilyPotHP);
-    LilyPotHPBox->Connect([=] { checkbox.LilyPotHP = LilyPotHPBox->GetCheck(); });
+    LilyPotHPBox->SetCheck(settings.LilyPotHP);
+    LilyPotHPBox->Connect([=] { settings.LilyPotHP = LilyPotHPBox->GetCheck(); });
 
     y += SPACE + HEIGHT;
     auto NutSpikeHPBox = window->AddCheckBox("坚刺血条", x, y, BTNWIDTH, HEIGHT);
-    NutSpikeHPBox->SetCheck(checkbox.NutSpikeHP);
-    NutSpikeHPBox->Connect([=] { checkbox.NutSpikeHP = NutSpikeHPBox->GetCheck(); });
+    NutSpikeHPBox->SetCheck(settings.NutSpikeHP);
+    NutSpikeHPBox->Connect([=] { settings.NutSpikeHP = NutSpikeHPBox->GetCheck(); });
 
     y += SPACE + HEIGHT;
 
     y += SPACE + HEIGHT;
     auto IcetrailBox = window->AddCheckBox("冰道冷却", x, y, BTNWIDTH, HEIGHT);
-    IcetrailBox->SetCheck(checkbox.Icetrail);
-    IcetrailBox->Connect([=] { checkbox.Icetrail = IcetrailBox->GetCheck(); });
+    IcetrailBox->SetCheck(settings.Icetrail);
+    IcetrailBox->Connect([=] { settings.Icetrail = IcetrailBox->GetCheck(); });
 
     y += SPACE + HEIGHT;
     auto GigaStatBox = window->AddCheckBox("红眼统计", x, y, BTNWIDTH, HEIGHT);
-    GigaStatBox->SetCheck(checkbox.GigaStat);
-    GigaStatBox->Connect([=] { checkbox.GigaStat = GigaStatBox->GetCheck(); });
+    GigaStatBox->SetCheck(settings.GigaStat);
+    GigaStatBox->Connect([=] { settings.GigaStat = GigaStatBox->GetCheck(); });
 
     y += SPACE + HEIGHT;
     auto GigaCountBox = window->AddCheckBox("红眼数量", x, y, BTNWIDTH, HEIGHT);
-    GigaCountBox->SetCheck(checkbox.GigaCount);
-    GigaCountBox->Connect([=] { checkbox.GigaCount = GigaCountBox->GetCheck(); });
+    GigaCountBox->SetCheck(settings.GigaCount);
+    GigaCountBox->Connect([=] { settings.GigaCount = GigaCountBox->GetCheck(); });
 
     y += SPACE + HEIGHT;
     auto ZomboniCountBox = window->AddCheckBox("冰车数量", x, y, BTNWIDTH, HEIGHT);
-    ZomboniCountBox->SetCheck(checkbox.ZomboniCount);
-    ZomboniCountBox->Connect([=] { checkbox.ZomboniCount = ZomboniCountBox->GetCheck(); });
+    ZomboniCountBox->SetCheck(settings.ZomboniCount);
+    ZomboniCountBox->Connect([=] { settings.ZomboniCount = ZomboniCountBox->GetCheck(); });
 
     y += SPACE + HEIGHT;
     auto FootballCountBox = window->AddCheckBox("橄榄数量", x, y, BTNWIDTH, HEIGHT);
-    FootballCountBox->SetCheck(checkbox.FootballCount);
-    FootballCountBox->Connect([=] { checkbox.FootballCount = FootballCountBox->GetCheck(); });
+    FootballCountBox->SetCheck(settings.FootballCount);
+    FootballCountBox->Connect([=] { settings.FootballCount = FootballCountBox->GetCheck(); });
 
     y += SPACE + HEIGHT;
     auto JackExplosionRangeBox = window->AddCheckBox("受炸提示", x, y, BTNWIDTH, HEIGHT);
-    JackExplosionRangeBox->SetCheck(checkbox.JackExplosionRange);
-    JackExplosionRangeBox->Connect([=] { checkbox.JackExplosionRange = JackExplosionRangeBox->GetCheck(); });
+    JackExplosionRangeBox->SetCheck(settings.JackExplosionRange);
+    JackExplosionRangeBox->Connect([=] { settings.JackExplosionRange = JackExplosionRangeBox->GetCheck(); });
 
     y += SPACE + HEIGHT;
     auto ShowSpeedBox = window->AddCheckBox("显示倍速", x, y, BTNWIDTH, HEIGHT);
-    ShowSpeedBox->SetCheck(checkbox.ShowSpeed);
-    ShowSpeedBox->Connect([=] { checkbox.ShowSpeed = ShowSpeedBox->GetCheck(); });
+    ShowSpeedBox->SetCheck(settings.ShowSpeed);
+    ShowSpeedBox->Connect([=] { settings.ShowSpeed = ShowSpeedBox->GetCheck(); });
 }
 
 AWindow* BasicPageWindow(int pageX, int pageY) {
     auto window = mainWindow.AddWindow(pageX, pageY);
 
     constexpr static int SPACE = 5;
-    constexpr static int BTNWIDTH = 75;
+    constexpr static int WIDTH = 100;
     constexpr static int HEIGHT = 25;
+    constexpr static int BTNWIDTH = 75;
 
     int x = SPACE;
     int y = 0;
@@ -1871,9 +1852,9 @@ AWindow* BasicPageWindow(int pageX, int pageY) {
     CreateShowInfoGroup(window, x + WIDTH * 4 + SPACE * 6, y);
 
     window->AddLabel("", x, y, BTNWIDTH, HEIGHT);
-    window->AddLabel(SpeedGearsText, x + SPACE, y, BTNWIDTH - SPACE, HEIGHT);
+    window->AddLabel("速度档位", x + SPACE, y, BTNWIDTH - SPACE, HEIGHT);
     x += BTNWIDTH + SPACE;
-    SpeedGearsEdit = window->AddEdit(SpeedGearsStr, x, y, 345, HEIGHT, ES_AUTOHSCROLL);
+    auto SpeedGearsEdit = window->AddEdit(settings.SpeedGears, x, y, 345, HEIGHT, ES_AUTOHSCROLL);
     x += SpeedGearsEdit->GetWidth() + SPACE;
 
     x = SPACE;
@@ -1917,20 +1898,19 @@ AWindow* BasicPageWindow(int pageX, int pageY) {
 
     auto ApplyAllBtn = window->AddPushButton("一键设置", x, y, BTNWIDTH, HEIGHT);
     ApplyAllBtn->Connect([=] {
+        std::strcpy(settings.SpeedGears, SpeedGearsEdit->GetText().c_str());
         SetGameSpeedGears(SpeedGearsEdit->GetText());
-        state.WavelengthRecord = std::stoi(WavelengthRecordComboBox->GetString());
-        state.SkipTickWave = std::stoi(SkipTickWaveComboBox->GetString());
+        settings.WavelengthRecord = std::stoi(WavelengthRecordComboBox->GetString());
+        settings.SkipTickWave = std::stoi(SkipTickWaveComboBox->GetString());
         if (LockStateComboBox->GetString() == "-")
-            state.ReadOnly = -1;
+            settings.ReadOnly = -1;
         if (LockStateComboBox->GetString() == "No")
-            state.ReadOnly = 0;
+            settings.ReadOnly = 0;
         if (LockStateComboBox->GetString() == "Yes")
-            state.ReadOnly = 1;
+            settings.ReadOnly = 1;
         if (MusicComboBox->GetString() != "-")
             SetMusic(std::stoi(MusicComboBox->GetString()));
     });
-
-    // CreateGameCtrlGroup(window, SPACE, SPACE);
 
     x = SPACE;
     y += SPACE + HEIGHT;
@@ -1943,9 +1923,10 @@ AWindow* KeyPageWindow(int pageX, int pageY) {
     auto window = mainWindow.AddWindow(pageX, pageY);
 
     constexpr static int SPACE = 5;
+    constexpr static int HEIGHT = 25;
     constexpr static int BTNWIDTH = 75;
     constexpr static int BOXWIDTH = 125;
-    constexpr static int HEIGHT = 25;
+
     int x = 0;
     int y = 0;
 
@@ -2012,41 +1993,32 @@ AWindow* KeyPageWindow(int pageX, int pageY) {
             keyHandles[i].Stop();
         for (size_t i = 0; i < keyHandles.size(); ++i)
             keyHandles[i] = AConnect(keyBindings[i], funcs[i]);
-        SpeedGearsStr = "0.1 0.25 0.5 1.0 2.5 5.0 10.0";
-        SpeedGearsVec = {0.1, 0.25, 0.5, 1.0, 2.5, 5.0, 10.0};
-        SpeedGearsEdit->SetText(SpeedGearsStr);
         Info("已将所有按键初始化");
     });
 
     x += resetBtn->GetWidth() + SPACE;
 
     // 导入配置文件
-    auto loadSettingsBtn = window->AddPushButton("导入配置文件", x, y, 100, HEIGHT);
+    auto loadSettingsBtn = window->AddPushButton("导入按键配置", x, y, 100, HEIGHT);
     loadSettingsBtn->Connect([=] {
-        if (!LoadSettings()) {
-            ::Info("未找到配置文件，导入失败！");
+        if (!LoadKeybindings()) {
+            ::Info("未找到按键配置文件，导入失败！");
             return;
         }
-
-        for (size_t i = 0; i < keyEdits.size(); ++i) {
+        for (size_t i = 0; i < keyEdits.size(); ++i)
             keyEdits[i]->SetText(keyBindings[i]);
-        }
-        SpeedGearsEdit->SetText(SpeedGearsStr);
-        SetGameSpeedGears(SpeedGearsStr);
-        ::Info("配置文件导入成功！");
+        ::Info("按键配置文件导入成功！");
     });
 
     x += loadSettingsBtn->GetWidth() + SPACE;
     // 导出配置文件
-    auto saveSettingsBtn = window->AddPushButton("导出配置文件", x, y, 100, HEIGHT);
+    auto saveSettingsBtn = window->AddPushButton("导出按键配置", x, y, 100, HEIGHT);
     saveSettingsBtn->Connect([=] {
-        if (SaveSettings())
-            ::Info("配置文件导出成功！保存在注入的pvz程序的根目录下，文件名为settings.ini");
+        if (SaveKeybindings())
+            ::Info("按键配置文件导出成功！保存在A-TAS的根目录下，文件名为keybindings.ini");
         else
-            ::Info("配置文件导出失败！");
+            ::Info("按键配置文件导出失败！");
     });
-
-    x += saveSettingsBtn->GetWidth() + SPACE;
 
     return window;
 }
@@ -2094,7 +2066,7 @@ void zombieListInfo_update() {
             info_w[w] += (zombie_list[i][w] >= 10 ? "" : " ") + std::to_string(zombie_list[i][w]) + "\n";
     }
 
-    if (checkbox.ZombieList) {
+    if (settings.ZombieList) {
         if (zombieListName_label != nullptr)
             zombieListName_label->SetText(name);
         for (int w = 0; w < 20; w++)
@@ -2152,9 +2124,9 @@ AWindow* SpawnPageWindow(int pageX, int pageY) {
 
     constexpr int SPACE = 10;
     constexpr int WIDTH = 50;
+    constexpr int HEIGHT = 20;
     constexpr int ROW_CNT = 3;
     constexpr int COL_CNT = 10;
-    constexpr int HEIGHT = 20;
 
     window->AddLabel("", 5, 0, 624, 362);
 
@@ -2167,7 +2139,8 @@ AWindow* SpawnPageWindow(int pageX, int pageY) {
             int y = row * (HEIGHT + SPACE);
 
             infos[idx].box = window->AddCheckBox(infos[idx].name, x, y, 50, 25);
-            infos[idx].box->SetCheck(checkbox.Types[idx]);
+            infos[idx].box->SetCheck(settings.Types[idx]);
+            infos[idx].box->Connect([=] { settings.Types[idx] = infos[idx].box->GetCheck(); });
         }
     }
 
@@ -2191,13 +2164,13 @@ AWindow* SpawnPageWindow(int pageX, int pageY) {
     y += HEIGHT + SPACE;
 
     auto showZombieListBox = window->AddCheckBox("查看出怪列表", x, y, 125, 25);
-    showZombieListBox->SetCheck(checkbox.ZombieList);
+    showZombieListBox->SetCheck(settings.ZombieList);
     x += 2 * (WIDTH + SPACE + 3);
     auto averageSpawnBox = window->AddCheckBox("每行平均分配", x, y, 125, 25);
-    averageSpawnBox->SetCheck(checkbox.AverageRowSpawn);
+    averageSpawnBox->SetCheck(settings.AverageRowSpawn);
     x += 2 * (WIDTH + SPACE + 3);
     auto randomTypeBox = window->AddCheckBox("随机添加种类", x, y, 125, 25);
-    randomTypeBox->SetCheck(checkbox.RandomType);
+    randomTypeBox->SetCheck(settings.RandomType);
     x += 2 * (WIDTH + SPACE + 3);
     auto averageBtn = window->AddPushButton("平均出怪", x, y, 110, 25);
     x += 2 * (WIDTH + SPACE + 3);
@@ -2207,13 +2180,13 @@ AWindow* SpawnPageWindow(int pageX, int pageY) {
         std::vector<int> types;
         types.push_back(AZOMBIE);
         for (int i = 0; i < infos.size(); ++i) {
-            checkbox.Types[i] = infos[i].box->GetCheck();
-            if (checkbox.Types[i]) {
+            settings.Types[i] = infos[i].box->GetCheck();
+            if (settings.Types[i]) {
                 types.push_back(infos[i].type);
             }
         }
         FightOrCardUiCheck();
-        if (checkbox.RandomType) {
+        if (settings.RandomType) {
             try {
                 types = ACreateRandomTypeList(types);
             } catch (AException& exce) {
@@ -2225,9 +2198,9 @@ AWindow* SpawnPageWindow(int pageX, int pageY) {
         ::Info("出怪设置成功");
         zombieListInfo_update();
     };
-    showZombieListBox->Connect([=] { checkbox.ZombieList = showZombieListBox->GetCheck(); FightOrCardUiCheck(); zombieListInfo_update(); });
-    averageSpawnBox->Connect([=] { checkbox.AverageRowSpawn = averageSpawnBox->GetCheck(); FightOrCardUiCheck(); if (checkbox.AverageRowSpawn) {AAverageSpawn();} });
-    randomTypeBox->Connect([=] { checkbox.RandomType = randomTypeBox->GetCheck(); });
+    showZombieListBox->Connect([=] { settings.ZombieList = showZombieListBox->GetCheck(); FightOrCardUiCheck(); zombieListInfo_update(); });
+    averageSpawnBox->Connect([=] { settings.AverageRowSpawn = averageSpawnBox->GetCheck(); FightOrCardUiCheck(); if (settings.AverageRowSpawn) {AAverageSpawn();} });
+    randomTypeBox->Connect([=] { settings.RandomType = randomTypeBox->GetCheck(); });
     averageBtn->Connect([=] { spawnFunc(ASetZombieMode::AVERAGE); });
     internalBtn->Connect([spawnFunc = std::move(spawnFunc)] { spawnFunc(ASetZombieMode::INTERNAL); });
 
@@ -2252,14 +2225,20 @@ AOnAfterInject({
         AMsgBox::Show("本工具只能在纯英文路径下才能正常运行, 你放置的路径: [" + GetToolPath() + "] 中含有非 ASCII 字符, 请将本工具的所有文件放置在纯英文路径下再次尝试运行");
         ATerminate(), );
     isInitSuccess = true;
+    strcpy(settings.SpeedGears, SpeedGearsDefault.c_str());
+    strcpy(settings.savePath, GetToolPath().c_str());
+    LoadSettings();
 
-    strcpy(state.savePath, GetToolPath().c_str());
     compressor = std::make_shared<A7zCompressor>(GetToolPath() + "/7z.exe");
-    aReplay.SetCompressor(*compressor);
-    aReplay.SetMouseVisible(checkbox.ShowMouse);
-    aReplay.SetSaveDirPath(state.savePath);
 
-    if (!LoadSettings())
+    SetGameSpeedGears(settings.SpeedGears);
+
+    aReplay.SetCompressor(*compressor);
+    aReplay.SetMouseVisible(settings.ShowMouse);
+    aReplay.SetSaveDirPath(settings.savePath);
+
+    // 若找不到keybindings.ini，使用预设
+    if (!LoadKeybindings())
         keyBindings = keyDefaults;
 
     // 点击选卡僵尸不进图鉴
@@ -2308,25 +2287,30 @@ AOnAfterInject({
     });
 });
 
-// 进入战斗即执行
+AOnBeforeExit({
+    SaveSettings();
+});
+
 AOnBeforeScript({
     if (AGetPvzBase()->GameUi() == 2)
         zombieListInfo_update();
 });
+
+// 进入战斗即执行
 AOnEnterFight({
     Paused = false;
     PausedSlowed = false;
     AMaidCheats::Phase() = MaidPhase;
     aItemCollector.Stop();
     LeftmostVisibleArea.assign(6, 10);
-    if (checkbox.AverageRowSpawn)
+    if (settings.AverageRowSpawn)
         AAverageSpawn();
     aReplay.SetMaxSaveCnt(INT_MAX);
     aReplay.SetShowInfo(false);
     zombieListInfo_update();
-    if (checkbox.AutoRecordOnGameStart)
+    if (settings.AutoRecordOnGameStart)
         replayOp.startRecordOp();
-    if (checkbox.ShowMe)
+    if (settings.ShowMe)
         tickShowMe.Start();
     else
         tickShowMe.Stop();
@@ -2349,7 +2333,7 @@ AOnExitFight({
 // 主体
 void AScript() {
     ASetReloadMode(AReloadMode::MAIN_UI_OR_FIGHT_UI);
-    Lock(AGetPvzBase()->MPtr(0x82C)->MRef<int>(0x20), AGetPvzBase()->LevelId(), state.ReadOnly);
+    Lock(AGetPvzBase()->MPtr(0x82C)->MRef<int>(0x20), AGetPvzBase()->LevelId(), settings.ReadOnly);
     AGetInternalLogger()->SetLevel({});
     // ASetInternalLogger(ConsoleLogger);
     fightInfoPainter.SetFontSize(17); // 波数时间，僵尸计数

@@ -11,8 +11,7 @@
 
 // 判断两个向量是否具有包含关系
 template <typename T>
-bool __VectorsContain(const std::vector<T>& vec1, const std::vector<T>& vec2)
-{
+bool __VectorsContain(const std::vector<T>& vec1, const std::vector<T>& vec2) {
     auto check = [](const std::vector<T>& vec1, const std::vector<T>& vec2) -> bool {
         std::unordered_set<T> count(vec1.begin(), vec1.end());
         for (const auto& ele : vec2) {
@@ -28,8 +27,7 @@ bool __VectorsContain(const std::vector<T>& vec1, const std::vector<T>& vec2)
 
 class MyKeyManager : public AOrderedExitFightHook<-1> {
 public:
-    static __AKeyManager::KeyState ToValidKey(std::vector<AKey> keyVec)
-    {
+    static __AKeyManager::KeyState ToValidKey(std::vector<AKey> keyVec) {
         if (keyVec.empty()) {
             MessageBoxW(NULL, AStrToWstr("您尚未输入任何按键!").c_str(), L"A-TAS KeyManager", MB_OK);
             return __AKeyManager::UNKNOWN;
@@ -49,13 +47,11 @@ public:
         }
     }
 
-    static void AddKey(std::vector<AKey> keyVec, AConnectHandle connectHandle)
-    {
+    static void AddKey(std::vector<AKey> keyVec, AConnectHandle connectHandle) {
         _keyMap.emplace(keyVec, connectHandle);
     }
 
-    static std::string KeyVecToStr(std::vector<AKey> keyVec)
-    {
+    static std::string KeyVecToStr(std::vector<AKey> keyVec) {
         std::string result;
         for (int i = 0; i < keyVec.size(); ++i) {
             result += __AKeyManager::ToName(keyVec[i]);
@@ -70,8 +66,7 @@ public:
 protected:
     static std::map<std::vector<AKey>, AConnectHandle> _keyMap;
 
-    virtual void _ExitFight() override
-    {
+    virtual void _ExitFight() override {
         _keyMap.clear();
     }
 };
@@ -256,8 +251,7 @@ static const std::unordered_map<std::string, AKey> VirtualKeyMap = {
 };
 
 // 将std::string中的所有英文大写
-inline std::string ToUpper(const std::string& input)
-{
+inline std::string ToUpper(const std::string& input) {
     std::string result = input;
     std::transform(result.begin(), result.end(), result.begin(), [](unsigned char c) {
         return std::toupper(c);
@@ -266,8 +260,7 @@ inline std::string ToUpper(const std::string& input)
 }
 
 // 将std::string对应的键转为键值
-inline AKey StrKeyToValue(const std::string& keystr)
-{
+inline AKey StrKeyToValue(const std::string& keystr) {
     auto str = ToUpper(keystr);
     if (!VirtualKeyMap.contains(str)) {
         MessageBoxW(NULL, AStrToWstr(keystr + "不存在").c_str(), L"A-TAS KeyManager", MB_OK);
@@ -277,8 +270,7 @@ inline AKey StrKeyToValue(const std::string& keystr)
 }
 
 // 以"+"为分隔符，将std::string分为多个std::string，并将它们的键值传入一个std::vector中作为返回值
-inline std::vector<AKey> StrToKeyValue(const std::string& str)
-{
+inline std::vector<AKey> StrToKeyValue(const std::string& str) {
     std::vector<AKey> result;
     std::istringstream iss(str);
     std::string temp;
@@ -290,8 +282,7 @@ inline std::vector<AKey> StrToKeyValue(const std::string& str)
     }
     return result;
 }
-inline std::chrono::milliseconds GetInitialDelayFromSystem()
-{
+inline std::chrono::milliseconds GetInitialDelayFromSystem() {
     UINT keyboardDelay = 0;
     if (SystemParametersInfo(SPI_GETKEYBOARDDELAY, 0, &keyboardDelay, 0)) {
         // The system returns a value from 0 to 3.
@@ -302,8 +293,7 @@ inline std::chrono::milliseconds GetInitialDelayFromSystem()
     return std::chrono::milliseconds(500);
 }
 
-inline std::chrono::milliseconds GetRepeatIntervalFromSystem()
-{
+inline std::chrono::milliseconds GetRepeatIntervalFromSystem() {
     UINT keyboardSpeed = 0;
     if (SystemParametersInfo(SPI_GETKEYBOARDSPEED, 0, &keyboardSpeed, 0)) {
         // keyboardSpeed is between 0 (slow) and 31 (fast).
@@ -329,8 +319,7 @@ inline std::chrono::milliseconds GetRepeatIntervalFromSystem()
 // 就会报错，是因为先按下ctrl，shift，p时会执行第一个AConnect，再此基础上再按下Z才会执行第二个AConnect，可能导致操作的冲突
 template <typename Op>
     requires __AIsCoOpOrOp<Op>
-AConnectHandle AConnect(std::vector<AKey> keyVec, Op&& op, int priority = 0, int runMode = ATickRunner::GLOBAL)
-{
+AConnectHandle AConnect(std::vector<AKey> keyVec, Op&& op, int priority = 0, int runMode = ATickRunner::GLOBAL) {
     if (MyKeyManager::ToValidKey(keyVec) != __AKeyManager::VALID)
         return AConnectHandle();
 
@@ -376,8 +365,7 @@ AConnectHandle AConnect(std::vector<AKey> keyVec, Op&& op, int priority = 0, int
 // 就会报错，是因为先按下ctrl，shift，p时会执行第一个AConnect，再此基础上再按下Z才会执行第二个AConnect，可能导致操作的冲突
 template <typename Op>
     requires __AIsCoOpOrOp<Op>
-AConnectHandle AConnect(std::string keyStr, Op&& op, int priority = 0, int runMode = ATickRunner::GLOBAL)
-{
+AConnectHandle AConnect(std::string keyStr, Op&& op, int priority = 0, int runMode = ATickRunner::GLOBAL) {
     if (keyStr.empty())
         return AConnectHandle();
 

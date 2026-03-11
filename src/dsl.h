@@ -6,8 +6,7 @@
 #define __ADSL_H__
 #include "avz.h"
 
-inline void AAverageSpawn(const std::set<int>& types = {})
-{
+inline void AAverageSpawn(const std::set<int>& types = {}) {
     std::vector<int> default_rows;
     for (int i = 0; i < aFieldInfo.nRows; ++i)
         if (aFieldInfo.rowType[i + 1] == ARowType::LAND)
@@ -54,8 +53,7 @@ inline void AAverageSpawn(const std::set<int>& types = {})
     }
 }
 
-inline APlant* Card(APlantType seed, int row, float col)
-{
+inline APlant* Card(APlantType seed, int row, float col) {
     int seed_ = seed % AM_PEASHOOTER;
     if (AAsm::GetPlantRejectType(seed_, row - 1, int(col - 0.5)) == AAsm::NEEDS_POT)
         ACard(AFLOWER_POT, row, col);

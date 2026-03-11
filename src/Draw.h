@@ -58,8 +58,7 @@ struct ABar {
         , barARGB(barARGB)
         , backgroundARGB(backgroundARGB)
         , frameARGB(frameARGB)
-        , frameThickness(frameThickness)
-    {
+        , frameThickness(frameThickness) {
     }
     template <typename T, typename = std::enable_if_t<std::is_arithmetic_v<T>>>
     ABar(int posX, int posY, double denominator, double numerator, std::initializer_list<T> inputSeparators = {}, double round = 1, ABar::Direction direction = ABar::RIGHT, int length = 100, int width = 10, uint32_t barARGB = 0xFFFFC000, uint32_t backgroundARGB = 0xFFFFFFFF, uint32_t frameARGB = 0xFF000000, int frameThickness = 1)
@@ -74,8 +73,7 @@ struct ABar {
         , barARGB(barARGB)
         , backgroundARGB(backgroundARGB)
         , frameARGB(frameARGB)
-        , frameThickness(frameThickness)
-    {
+        , frameThickness(frameThickness) {
         // 把输入的数据类型转换成double
         for (const auto& val : inputSeparators) {
             separators.push_back(static_cast<double>(val));
@@ -106,15 +104,13 @@ struct A7Seg {
         , posY(posY)
         , length(length)
         , width(width)
-        , space(space)
-    {
+        , space(space) {
     }
 };
 
 class MyPainter : public APainter {
 public:
-    void Draw(const ABar& bar, int duration = 1)
-    {
+    void Draw(const ABar& bar, int duration = 1) {
         // 跳帧模式下，绘制无效
         if (__aGameControllor.isSkipTick()) {
             return;
@@ -226,8 +222,7 @@ public:
     // [backgroundARGB] 背景ARGB；
     // [drawbackground] 是否绘制背景；
     // [duration] 持续时间；
-    void Draw(const A7Seg& num, int edgespace = 1, uint32_t numARGB = 0xFF000000, uint32_t backgroundARGB = 0xFFFFFFFF, bool drawbackground = true, int duration = 1)
-    {
+    void Draw(const A7Seg& num, int edgespace = 1, uint32_t numARGB = 0xFF000000, uint32_t backgroundARGB = 0xFFFFFFFF, bool drawbackground = true, int duration = 1) {
         // 跳帧模式下，绘制无效
         if (__aGameControllor.isSkipTick()) {
             return;
@@ -319,8 +314,7 @@ public:
         info.duration = duration;
     }
 
-    void Draw(const AText& posText, uint32_t textARGB = 0xFF00FFFF, uint32_t backgroundARGB = 0x0, int duration = 1)
-    {
+    void Draw(const AText& posText, uint32_t textARGB = 0xFF00FFFF, uint32_t backgroundARGB = 0x0, int duration = 1) {
         // 跳帧模式下，绘制无效
         if (__aGameControllor.isSkipTick()) {
             return;
@@ -334,8 +328,7 @@ public:
         APainter::Draw(posText, duration);
     }
 
-    void Draw(const ARect& rect, uint32_t RectARGB = 0xAF000000, int duration = 1)
-    {
+    void Draw(const ARect& rect, uint32_t RectARGB = 0xAF000000, int duration = 1) {
         // 跳帧模式下，绘制无效
         if (__aGameControllor.isSkipTick()) {
             return;

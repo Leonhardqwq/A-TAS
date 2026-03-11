@@ -14,8 +14,7 @@ static bool Paused = false;
 static int PausedCd = 480;
 
 static std::vector<double> SpeedGearsVec = {0.1, 0.25, 0.5, 1.0, 2.5, 5.0, 10.0};
-static const char* SpeedGearsText = "速度档位";
-static std::string SpeedGearsStr = "0.1 0.25 0.5 1.0 2.5 5.0 10.0";
+static std::string SpeedGearsDefault = "0.1 0.25 0.5 1.0 2.5 5.0 10.0";
 
 inline void Decelerate() {
     int game_speed_gear = SpeedGearsVec.size();

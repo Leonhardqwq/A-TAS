@@ -18,24 +18,20 @@
 class __AWindowClass : public AOrderedAfterInjectHook<-100>,
                        public AOrderedBeforeExitHook<100> {
 public:
-    const wchar_t* GetName() noexcept
-    {
+    const wchar_t* GetName() noexcept {
         return _wndClassName;
     }
-    HINSTANCE GetInstance() noexcept
-    {
+    HINSTANCE GetInstance() noexcept {
         return _hInst;
     }
-    static auto&& GetOpMap()
-    {
+    static auto&& GetOpMap() {
         return _opMap;
     }
 
     __AWindowClass() = default;
 
 protected:
-    virtual void _AfterInject() override
-    {
+    virtual void _AfterInject() override {
         _hInst = AGetDllInstance();
         WNDCLASSW wc = {};
         wc.lpfnWndProc = _HandleMsg;
@@ -44,16 +40,14 @@ protected:
         RegisterClassW(&wc);
     }
 
-    virtual void _BeforeExit() override
-    {
+    virtual void _BeforeExit() override {
         UnregisterClassW(_wndClassName, GetInstance());
     }
 
     __AWindowClass(const __AWindowClass&) = delete;
     __AWindowClass& operator=(const __AWindowClass&) = delete;
 
-    static WINAPI LRESULT _HandleMsg(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
-    {
+    static WINAPI LRESULT _HandleMsg(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
         auto childHwnd = (HWND)lParam;
         switch (msg) {
         case WM_COMMAND:
@@ -90,8 +84,7 @@ class ABasicWindow : public AOrderedBeforeExitHook<-1> {
 
 public:
     ABasicWindow() = default;
-    virtual void _BeforeExit() override
-    {
+    virtual void _BeforeExit() override {
         if (_hwnd != nullptr) {
             DestroyWindow(_hwnd);
             _hwnd = nullptr;
@@ -101,31 +94,26 @@ public:
         }
     }
 
-    HWND GetHwnd()
-    {
+    HWND GetHwnd() {
         return _hwnd;
     }
 
-    ABasicWindow* GetParent()
-    {
+    ABasicWindow* GetParent() {
         return _parent;
     }
 
-    void SetText(const std::string& text)
-    {
+    void SetText(const std::string& text) {
         SetWindowTextW(_hwnd, AStrToWstr(text).c_str());
     }
 
-    std::string GetText()
-    {
+    std::string GetText() {
         std::wstring str;
         str.resize(GetWindowTextLengthW(_hwnd) + 1);
         GetWindowTextW(_hwnd, str.data(), str.size());
         return AWStrToStr(str);
     }
 
-    bool SetFont(const std::string& name, int fontSize = 20, bool isBold = false)
-    {
+    bool SetFont(const std::string& name, int fontSize = 20, bool isBold = false) {
         if (_font != nullptr) {
             DeleteObject(_font);
         }
@@ -141,48 +129,40 @@ public:
         return true;
     }
 
-    int GetWidth() const noexcept
-    {
+    int GetWidth() const noexcept {
         return _width;
     }
 
-    virtual int GetHeight()
-    {
+    virtual int GetHeight() {
         return _height;
     }
 
-    bool GetEnable() const noexcept
-    {
+    bool GetEnable() const noexcept {
         return _isEnable;
     }
 
-    void SetEnable(bool enable)
-    {
+    void SetEnable(bool enable) {
         _isEnable = enable;
         EnableWindow(_hwnd, _isEnable);
     }
 
-    void Show()
-    {
+    void Show() {
         ShowWindow(_hwnd, SW_SHOW);
         _isHide = false;
     }
 
-    void Hide()
-    {
+    void Hide() {
         ShowWindow(_hwnd, SW_HIDE);
         _isHide = true;
     }
 
-    bool IsHide() const noexcept
-    {
+    bool IsHide() const noexcept {
         return _isHide;
     }
 
 protected:
     void _CreateWindow(ABasicWindow* parent, const std::wstring& className, DWORD style,
-        const std::string& text, int x, int y, int width = 0, int height = 0)
-    {
+        const std::string& text, int x, int y, int width = 0, int height = 0) {
         if (parent != nullptr && (width <= 0 || height <= 0)) {
             RECT rect;
             GetClientRect(parent->GetHwnd(), &rect);
@@ -224,8 +204,7 @@ protected:
 class AConnectControl : public ABasicWindow {
 public:
     template <typename Op>
-    void Connect(Op&& op)
-    {
+    void Connect(Op&& op) {
         if (__aWindowClass.GetOpMap().contains(this->GetHwnd())) {
             AGetInternalLogger()->Error("同一个控件无法同时绑定多个操作， 如需绑定新操作，请调用 Stop 将之前的绑定删除");
             return;
@@ -233,76 +212,64 @@ public:
         __aWindowClass.GetOpMap()[this->GetHwnd()] = std::forward<Op>(op);
     }
 
-    void Stop()
-    {
+    void Stop() {
         __aWindowClass.GetOpMap().erase(this->GetHwnd());
     }
 };
 
 class APushButton : public AConnectControl {
 public:
-    APushButton(ABasicWindow& parent, const std::string& text, int x, int y, int width = 80, int height = 30)
-    {
+    APushButton(ABasicWindow& parent, const std::string& text, int x, int y, int width = 80, int height = 30) {
         _CreateWindow(&parent, L"Button", WS_VISIBLE | WS_CHILD | BS_PUSHBUTTON, text, x, y, width, height);
     }
 };
 
 class ACheckBox : public AConnectControl {
 public:
-    ACheckBox(ABasicWindow& parent, const std::string& text, int x, int y, int width = 80, int height = 30)
-    {
+    ACheckBox(ABasicWindow& parent, const std::string& text, int x, int y, int width = 80, int height = 30) {
         _CreateWindow(&parent, L"Button", WS_VISIBLE | WS_CHILD | BS_AUTOCHECKBOX, text, x, y, width, height);
     }
 
-    bool GetCheck()
-    {
+    bool GetCheck() {
         return Button_GetCheck(_hwnd);
     }
 
-    void SetCheck(bool check)
-    {
+    void SetCheck(bool check) {
         Button_SetCheck(_hwnd, check);
     }
 };
 
 class AComboBox : public ABasicWindow {
 public:
-    AComboBox(ABasicWindow& parent, int x, int y, int width = 80, int height = 300)
-    {
+    AComboBox(ABasicWindow& parent, int x, int y, int width = 80, int height = 300) {
         _CreateWindow(&parent, L"ComboBox", CBS_DROPDOWN | WS_CHILD | WS_VISIBLE | WS_VSCROLL, "", x, y, width, height);
     }
 
-    void AddString(const std::string& str)
-    {
+    void AddString(const std::string& str) {
         ComboBox_AddString(_hwnd, AStrToWstr(str).c_str());
         ComboBox_SetCurSel(_hwnd, 0);
     }
 
     template <typename... Others>
-    void AddString(const std::string& first, Others&&... others)
-    {
+    void AddString(const std::string& first, Others&&... others) {
         AddString(first);
         AddString(std::forward<Others>(others)...);
     }
 
-    void DeleteString(const std::string& str, int startIdx = 0)
-    {
+    void DeleteString(const std::string& str, int startIdx = 0) {
         int idx = ComboBox_FindString(_hwnd, startIdx, AStrToWstr(str).c_str());
         ComboBox_DeleteString(_hwnd, idx);
     }
 
-    void DeleteIdx(int idx)
-    {
+    void DeleteIdx(int idx) {
         ComboBox_DeleteString(_hwnd, idx);
     }
 
-    int GetCount()
-    {
+    int GetCount() {
         return ComboBox_GetCount(_hwnd);
     }
 
-    std::string GetString(int idx = -1)
-    {
+    std::string GetString(int idx = -1) {
         if (idx == -1) {
             idx = ComboBox_GetCurSel(_hwnd);
         }
@@ -312,38 +279,33 @@ public:
         return AWStrToStr(text);
     }
 
-    virtual int GetHeight()
-    {
+    virtual int GetHeight() {
         return ComboBox_GetItemHeight(_hwnd);
     }
 
     // 得到展开状态下 ComboBox 的长度
-    int GetTotalHeight() const noexcept
-    {
+    int GetTotalHeight() const noexcept {
         return _height;
     }
 };
 
 class AEdit : public ABasicWindow {
 public:
-    AEdit(ABasicWindow& parent, int x, int y, int width = 80, int height = 30, DWORD style = 0)
-    {
+    AEdit(ABasicWindow& parent, int x, int y, int width = 80, int height = 30, DWORD style = 0) {
         _CreateWindow(&parent, L"Edit", WS_VISIBLE | WS_CHILD | WS_BORDER | style, "", x, y, width, height);
     }
 };
 
 class ALabel : public ABasicWindow {
 public:
-    ALabel(ABasicWindow& parent, const std::string& text, int x, int y, int width = 80, int height = 30)
-    {
+    ALabel(ABasicWindow& parent, const std::string& text, int x, int y, int width = 80, int height = 30) {
         _CreateWindow(&parent, L"Static", WS_VISIBLE | WS_CHILD | SS_LEFT, text, x, y, width, height);
     }
 };
 
 class AWindow : public ABasicWindow {
 public:
-    AWindow(ABasicWindow& parent, int x, int y, int width = 0, int height = 0)
-    {
+    AWindow(ABasicWindow& parent, int x, int y, int width = 0, int height = 0) {
         _CreateWindow(&parent, __aWindowClass.GetName(), WS_CHILD | WS_VISIBLE,
             "", x, y, width, height);
     }
@@ -351,29 +313,25 @@ public:
     AWindow(const AWindow&) = delete;
     AWindow& operator=(const AWindow&) = delete;
 
-    AWindow* AddWindow(int x, int y, int width = 0, int height = 0)
-    {
+    AWindow* AddWindow(int x, int y, int width = 0, int height = 0) {
         auto ptr = std::make_shared<AWindow>(*this, x, y, width, height);
         _childs.emplace_back(ptr);
         return ptr.get();
     }
 
-    APushButton* AddPushButton(const std::string& text, int x, int y, int width = 100, int height = 30)
-    {
+    APushButton* AddPushButton(const std::string& text, int x, int y, int width = 100, int height = 30) {
         auto ptr = std::make_shared<APushButton>(*this, text, x, y, width, height);
         _childs.emplace_back(ptr);
         return ptr.get();
     }
 
-    ACheckBox* AddCheckBox(const std::string& text, int x, int y, int width = 100, int height = 30)
-    {
+    ACheckBox* AddCheckBox(const std::string& text, int x, int y, int width = 100, int height = 30) {
         auto ptr = std::make_shared<ACheckBox>(*this, text, x, y, width, height);
         _childs.emplace_back(ptr);
         return ptr.get();
     }
 
-    AComboBox* AddComboBox(int x, int y, int width = 100, int height = 90)
-    {
+    AComboBox* AddComboBox(int x, int y, int width = 100, int height = 90) {
         auto ptr = std::make_shared<AComboBox>(*this, x, y, width, height);
         _childs.emplace_back(ptr);
         return ptr.get();
@@ -384,16 +342,14 @@ public:
     // 设置为 ES_MULTILINE 就可以多行输入
     // 多个格式可以同时设定，使用位运算符 | 即可
     // 具体查看 https://learn.microsoft.com/zh-cn/windows/win32/controls/edit-control-styles
-    AEdit* AddEdit(const std::string& text, int x, int y, int width = 100, int height = 30, DWORD style = 0)
-    {
+    AEdit* AddEdit(const std::string& text, int x, int y, int width = 100, int height = 30, DWORD style = 0) {
         auto ptr = std::make_shared<AEdit>(*this, x, y, width, height, style);
         _childs.emplace_back(ptr);
         ptr->SetText(text);
         return ptr.get();
     }
 
-    ALabel* AddLabel(const std::string& text, int x, int y, int width = 100, int height = 30)
-    {
+    ALabel* AddLabel(const std::string& text, int x, int y, int width = 100, int height = 30) {
         auto ptr = std::make_shared<ALabel>(*this, text.c_str(), x, y, width, height);
         _childs.emplace_back(ptr);
         return ptr.get();
@@ -406,8 +362,7 @@ protected:
 class AMainWindow : public AWindow,
                     public AOrderedAfterInjectHook<-1> {
 public:
-    AMainWindow(const std::string& title, int width = 600, int height = 400, bool isActiveInSTMode = true, int x = -1, int y = -1)
-    {
+    AMainWindow(const std::string& title, int width = 600, int height = 400, bool isActiveInSTMode = true, int x = -1, int y = -1) {
         _title = title;
         _x = x;
         _y = y;
@@ -417,8 +372,7 @@ public:
     }
 
 protected:
-    virtual void _AfterInject() override
-    {
+    virtual void _AfterInject() override {
         if (_x < 0) {
             _x = CW_USEDEFAULT;
         }
@@ -455,12 +409,10 @@ protected:
 class ACtrlConnHandle {
 public:
     ACtrlConnHandle(AConnectControl* ptr)
-        : _ptr(ptr)
-    {
+        : _ptr(ptr) {
     }
 
-    void Stop()
-    {
+    void Stop() {
         _ptr->Stop();
     }
 
@@ -469,8 +421,7 @@ protected:
 };
 
 template <typename Op>
-ACtrlConnHandle AConnect(AConnectControl* ptr, Op&& op)
-{
+ACtrlConnHandle AConnect(AConnectControl* ptr, Op&& op) {
     if (ptr != nullptr) {
         ptr->Connect(std::forward<Op>(op));
     }
