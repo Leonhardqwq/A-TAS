@@ -1,9 +1,9 @@
 // A-TAS 4.0 by mint/残云/碧水/正弦
 // 技术指导：Leonhard/铃仙/向量/零度
-// 本辅助工具目前版本使用的键控注入框架应使用AvZ2 2.8.4 20250515版本，源码不保证对更旧版本AvZ的兼容性
+// 本辅助工具目前版本使用的键控注入框架应使用AvZ2 2.8.5 20250711版本，源码不保证对更旧版本AvZ的兼容性
 
 #define UNICODE
-#define A_TAS_VERSION 202506232150
+#define A_TAS_VERSION 202507131420
 #include "AsmFunc.h"
 #include "Draw.h"
 #include "dsl.h"
