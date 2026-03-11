@@ -50,8 +50,6 @@ inline void Accelerate() {
 
 // 0.25倍速
 inline void ResetSpeed() {
-    if (SnapshotModeSwitch)
-        return;
     if (PausedCd < 480)
         return;
     if (Paused) {

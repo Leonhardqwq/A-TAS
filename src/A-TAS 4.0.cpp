@@ -3,10 +3,11 @@
 // 本辅助工具目前版本使用的键控注入框架应使用AvZ2 2.8.5 20250711版本，源码不保证对更旧版本AvZ的兼容性
 
 #define UNICODE
-#define A_TAS_VERSION 202507131420
+#define A_TAS_VERSION 202601281520
 #include "AsmFunc.h"
 #include "Draw.h"
-#include "dsl.h"
+#include "asm_insert_code/asm_insert_code.h"
+#include "dsl/shorthand.h"
 #include "game_controller.h"
 #include "showme/sm.h"
 #include "win32gui/main.h"
@@ -52,6 +53,8 @@ static std::array<AEdit*, 33> keyEdits;
 
 // 预设设置
 struct {
+    long long Version = A_TAS_VERSION;
+
     // General
     char SpeedGears[256];
     int WavelengthRecord = 3;
@@ -61,7 +64,6 @@ struct {
     // Replay
     bool AutoRecordOnGameStart = true;
     bool ShowMouse = true;
-    bool AutoStop = true;
     bool Interpolate = true;
     bool ShowReplayInfo = true;
     int recordTickInterval = 10;
@@ -70,8 +72,8 @@ struct {
 
     // Display
     bool ShowMe = true;
-    bool CobCD = true;
     bool PlantOffset = true;
+    bool CobCD = true;
     bool CobGloomHP = true;
     bool LilyPotHP = true;
     bool PumpkinHP = true;
@@ -92,11 +94,44 @@ struct {
     bool TotalHP = true;
     bool ShowSpeed = true;
 
+    // Display Color
+    uint32_t CobCDARGB = 0xFFFFFF00;
+    uint32_t CobGloomHPARGB = 0xFF4CAF50;
+    uint32_t LilyPotHPARGB = 0xFF4CAF50;
+    uint32_t PumpkinHPARGB = 0xFFFFA500;
+    uint32_t NutSpikeHPARGB = 0xFF4CAF50;
+    uint32_t OtherPlantHPARGB = 0xFF4CAF50;
+    uint32_t CraterARGB = 0xFF965821;
+    uint32_t IcetrailARGB = 0xFF16F2EB;
+    uint32_t GigaStatARGB1 = 0xFFFF0000;
+    uint32_t GigaStatARGB2 = 0xFF9868BC;
+    uint32_t GigaHPARGB = 0xFFFF0000;
+    uint32_t GigaCountARGB = 0xFFFF0000;
+    uint32_t GargHPARGB = 0xFF9868BC;
+    uint32_t ZomboniCountARGB = 0xFF0040FF;
+    uint32_t FootballHPARGB = 0xFF6D706C;
+    uint32_t FootballCountARGB = 0xFF6D706C;
+    uint32_t JackCountdownARGB = 0xFFFF69B4;
+    uint32_t JackExplosionRangeARGB = 0x9AFF0000;
+    uint32_t TotalHPARGB1 = 0xFF9868BC;
+    uint32_t TotalHPARGB2 = 0xFF6D706C;
+    uint32_t ShowSpeedARGB1 = 0xFFFF0000;
+    uint32_t ShowSpeedARGB2 = 0xFF00FF00;
+
     // Spawn
     bool Types[26] = {};
     bool ZombieList = false;
     bool AverageRowSpawn = false;
     bool RandomType = false;
+
+    // Other
+    bool Row6Plant = false;
+    bool Row6Spawn = false;
+    bool SmallPool = false;
+    bool NormalPool = false;
+    bool Row34PoolSpawn = false;
+    bool SnorkelDolphinSpawn = false;
+
 } settings;
 
 // 得到本工具的路径
@@ -144,10 +179,14 @@ void SaveSettings() {
 }
 
 void LoadSettings() {
-    std::ifstream inFile(GetToolPath() + "/settings.dat", std::ios::in | std::ios::binary);
-    if (!inFile) {
+    std::ifstream inFile(GetToolPath() + "/settings.dat", std::ios::in | std::ios::binary | std::ios::ate);
+    if (!inFile)
+        return;
+    if (inFile.tellg() != sizeof(settings)) {
+        inFile.close();
         return;
     }
+    inFile.seekg(0, std::ios::beg);
     inFile.read((char*)&settings, sizeof(settings));
     inFile.close();
 }
@@ -771,7 +810,7 @@ void SafeCard(APlantType PlantType, int Row, int Col, int NeedTime = 99) {
         }
     }
     // 查完小丑后发现一切正常，则使用dsl的Card函数自动补充容器
-    Card(PlantType, Row, Col);
+    At(now) Card(PlantType, Row, Col);
 }
 
 // 智能用卡
@@ -852,7 +891,9 @@ void BalloonCaption() {
         return;
     for (auto& Zombie : aAliveZombieFilter) {
         if (Zombie.Type() == ABALLOON_ZOMBIE && isSeedUsableOrHolding(ABLOVER)) {
-            if (int(Zombie.Abscissa() - BalloonΔX(49, Zombie.Speed(), Zombie.SlowCountdown())) <= -100) {
+            if (int(Zombie.Abscissa()) <= -100) {
+                return;
+            } else if (int(Zombie.Abscissa() - BalloonΔX(49, Zombie.Speed(), Zombie.SlowCountdown())) <= -100) {
                 CreateCaption("Bite Blover", {BOTTOMFAST, 2});
                 return; // 若预计气球<50cs就进家，打印字幕啃吹
             } else if (int(Zombie.Abscissa() - BalloonΔX(50, Zombie.Speed(), Zombie.SlowCountdown())) <= -100) {
@@ -871,6 +912,8 @@ void BalloonPause() {
     if (BalloonPauseCd < 200) // 两次气球警告至少间隔200cs
         ++BalloonPauseCd;
     for (auto& Zombie : aAliveZombieFilter) {
+        if (Zombie.Type() == ABALLOON_ZOMBIE && int(Zombie.Abscissa()) <= -100)
+            return;
         if (BalloonPauseCd == 200 && Zombie.Type() == ABALLOON_ZOMBIE && int(Zombie.Abscissa() - BalloonΔX(50, Zombie.Speed(), Zombie.SlowCountdown())) <= -100 && isSeedUsableOrHolding(ABLOVER)) {
             Paused = true;
             ASetAdvancedPause(Paused, false, 0);
@@ -899,48 +942,48 @@ int RealCountdown() {
 // 这段逻辑最后更改的时间为20250313，确保血条覆盖顺序
 static int ShowInfoState = -1;
 void DrawInfo() {
-    // if (AGetMainObject() == nullptr)
-    //     return; // 防崩溃代码
+    if (AGetMainObject() == nullptr)
+        return; // 防崩溃代码
     if (settings.ShowReplayInfo && aReplay.GetState() == AReplay::RECORDING) {
         barPainter.Draw(ABar(685, 3, 1, 0, {}, 1, ABar::RIGHT, 106, 24, 0xFFFFC000, 0xC0FFFFFF));
         fightInfoPainter.Draw(AText("Rec.", 689, 4), 0xFFFF0000);
-        fightInfoPainter.Draw(AText(std::to_string(aReplay.GetRecordIdx()), 733, 4), 0xFFFF0000);
+        fightInfoPainter.Draw(AText(std::format("{}", aReplay.GetRecordIdx()), 733, 4), 0xFFFF0000);
     }
     if (settings.ShowReplayInfo && aReplay.GetState() == AReplay::PLAYING) {
         barPainter.Draw(ABar(685, 3, 1, 0, {}, 1, ABar::RIGHT, 106, 24, 0xFFFFC000, 0xC0FFFFFF));
         fightInfoPainter.Draw(AText("Play", 689, 4), 0xFF0000FF);
-        fightInfoPainter.Draw(AText(std::to_string(aReplay.GetPlayIdx() + 1), 733, 4), 0xFF0000FF);
+        fightInfoPainter.Draw(AText(std::format("{}", aReplay.GetPlayIdx()), 733, 4), 0xFF0000FF);
     }
     if (ShowInfoState == -1)
         return;
     for (auto& Plant : aAlivePlantFilter) { // 显血
         if (Plant.Type() == ACOB_CANNON && AGetCobRecoverTime(Plant.Index()) && settings.CobCD)
-            barPainter.Draw(ABar(Plant.Xi() + 4, Plant.Yi() + 17, 3475, 3475 - AGetCobRecoverTime(Plant.Index()), {350, 3350}, 1, ABar::RIGHT, 152, 7, 0xFFFFFF00, 0xA0FFFFFF));
+            barPainter.Draw(ABar(Plant.Xi() + 4, Plant.Yi() + 17, 3475, 3475 - AGetCobRecoverTime(Plant.Index()), {350, 3350}, 1, ABar::RIGHT, 152, 7, settings.CobCDARGB, 0xA0FFFFFF));
         if (Plant.Hp() != Plant.HpMax()) {
             if (Plant.Type() == ACOB_CANNON) {
                 if (settings.CobGloomHP)
-                    barPainter.Draw(ABar(Plant.Xi() + 4, Plant.Yi() + 25, Plant.HpMax(), Plant.Hp(), {}, 1, ABar::RIGHT, 152, 11, 0xFF4CAF50, 0xA0FFFFFF));
+                    barPainter.Draw(ABar(Plant.Xi() + 4, Plant.Yi() + 25, Plant.HpMax(), Plant.Hp(), {}, 1, ABar::RIGHT, 152, 11, settings.CobGloomHPARGB, 0xA0FFFFFF));
             } else if (Plant.Type() == AGLOOM_SHROOM) {
                 if (settings.CobGloomHP)
-                    barPainter.Draw(ABar(Plant.Xi() + 4, Plant.Yi() + 25, Plant.HpMax(), Plant.Hp(), {}, 1, ABar::RIGHT, 72, 11, 0xFF4CAF50, 0xA0FFFFFF));
+                    barPainter.Draw(ABar(Plant.Xi() + 4, Plant.Yi() + 25, Plant.HpMax(), Plant.Hp(), {}, 1, ABar::RIGHT, 72, 11, settings.CobGloomHPARGB, 0xA0FFFFFF));
             } else if (Plant.Type() == ACOFFEE_BEAN) {
                 if (settings.OtherPlantHP)
-                    barPainter.Draw(ABar(Plant.Xi() + 4, Plant.Yi() + 13, Plant.HpMax(), Plant.Hp(), {}, 1, ABar::RIGHT, 72, 11, 0xFF965821, 0xA0FFFFFF));
+                    barPainter.Draw(ABar(Plant.Xi() + 4, Plant.Yi() + 13, Plant.HpMax(), Plant.Hp(), {}, 1, ABar::RIGHT, 72, 11, settings.OtherPlantHPARGB, 0xA0FFFFFF));
             } else if (ARangeIn(Plant.Type(), {AWALL_NUT, ATALL_NUT, ASPIKEROCK})) {
                 if (settings.NutSpikeHP)
-                    barPainter.Draw(ABar(Plant.Xi() + 4, Plant.Yi() + 25, Plant.HpMax(), Plant.Hp(), {Plant.HpMax() / 3, Plant.HpMax() * 2 / 3}, 1, ABar::RIGHT, 72, 11, 0xFF4CAF50, 0xA0FFFFFF));
+                    barPainter.Draw(ABar(Plant.Xi() + 4, Plant.Yi() + 25, Plant.HpMax(), Plant.Hp(), {Plant.HpMax() / 3, Plant.HpMax() * 2 / 3}, 1, ABar::RIGHT, 72, 11, settings.NutSpikeHPARGB, 0xA0FFFFFF));
             } else if (Plant.Type() == APUMPKIN) {
                 if (settings.PumpkinHP)
-                    barPainter.Draw(ABar(Plant.Xi() + 4, Plant.Yi() + 45, Plant.HpMax(), Plant.Hp(), {Plant.HpMax() / 3, Plant.HpMax() * 2 / 3}, 1, ABar::RIGHT, 72, 11, 0xFFFFA500, 0xA0FFFFFF));
+                    barPainter.Draw(ABar(Plant.Xi() + 4, Plant.Yi() + 45, Plant.HpMax(), Plant.Hp(), {Plant.HpMax() / 3, Plant.HpMax() * 2 / 3}, 1, ABar::RIGHT, 72, 11, settings.PumpkinHPARGB, 0xA0FFFFFF));
             } else if (ARangeIn(Plant.Type(), {ALILY_PAD, AFLOWER_POT})) {
                 if (settings.LilyPotHP)
-                    barPainter.Draw(ABar(Plant.Xi() + 4, Plant.Yi() + 57, Plant.HpMax(), Plant.Hp(), {}, 1, ABar::RIGHT, 72, 11, 0xFF4CAF50, 0xA0FFFFFF));
+                    barPainter.Draw(ABar(Plant.Xi() + 4, Plant.Yi() + 57, Plant.HpMax(), Plant.Hp(), {}, 1, ABar::RIGHT, 72, 11, settings.LilyPotHPARGB, 0xA0FFFFFF));
             } else if (Plant.Type() == ASQUASH) {
                 if (settings.OtherPlantHP)
-                    barPainter.Draw(ABar(Plant.Xi() + 4, Plant.Yi() + 25, Plant.HpMax(), Plant.Hp(), {}, 1, ABar::RIGHT, 72, 11, 0xFF4CAF50, 0xA0FFFFFF));
+                    barPainter.Draw(ABar(Plant.Xi() + 4, Plant.Yi() + 25, Plant.HpMax(), Plant.Hp(), {}, 1, ABar::RIGHT, 72, 11, settings.OtherPlantHPARGB, 0xA0FFFFFF));
             } else {
                 if (settings.OtherPlantHP)
-                    barPainter.Draw(ABar(MyColToX(Plant.Col() + 1) + 4, MyRowToY(Plant.Row() + 1, Plant.Col() + 1) + 25, Plant.HpMax(), Plant.Hp(), {}, 1, ABar::RIGHT, 72, 11, 0xFF4CAF50, 0xA0FFFFFF));
+                    barPainter.Draw(ABar(MyColToX(Plant.Col() + 1) + 4, MyRowToY(Plant.Row() + 1, Plant.Col() + 1) + 25, Plant.HpMax(), Plant.Hp(), {}, 1, ABar::RIGHT, 72, 11, settings.OtherPlantHPARGB, 0xA0FFFFFF));
             }
         }
     }
@@ -949,14 +992,14 @@ void DrawInfo() {
             continue;
         auto Coordinate = MyGridToCoordinate(Place.Row() + 1, Place.Col() + 1);
         int Abscissa = Coordinate.first, Ordinate = Coordinate.second;
-        barPainter.Draw(ABar(Abscissa + 4, Ordinate + 62, 18000, Place.Value(), {}, 1, ABar::RIGHT, 72, 6, 0xFF965821, 0xA0FFFFFF, 0xFF000000, 0));
+        barPainter.Draw(ABar(Abscissa + 4, Ordinate + 62, 18000, Place.Value(), {}, 1, ABar::RIGHT, 72, 6, settings.CraterARGB, 0xA0FFFFFF, 0xFF000000, 0));
     }
     for (int Row = 1; Row <= 6; ++Row) { // 冰道
         if (LeftmostIceTrail(Row) > 9 || !settings.Icetrail)
             continue;
         auto Coordinate = MyGridToCoordinate(Row, LeftmostIceTrail(Row));
         int Abscissa = Coordinate.first, Ordinate = Coordinate.second;
-        barPainter.Draw(ABar(Abscissa + 4, Ordinate + 50, 3000, IceTrailCoverCD(Row), {}, 1, ABar::RIGHT, 72, 6, 0xFF16F2EB, 0xA0FFFFFF, 0xFF000000, 0));
+        barPainter.Draw(ABar(Abscissa + 4, Ordinate + 50, 3000, IceTrailCoverCD(Row), {}, 1, ABar::RIGHT, 72, 6, settings.IcetrailARGB, 0xA0FFFFFF, 0xFF000000, 0));
     }
     std::vector<int> FootballThisWave(6, 0);
     std::vector<int> ZomboniThisWave(6, 0);
@@ -966,7 +1009,7 @@ void DrawInfo() {
     for (auto& Zombie : aAliveZombieFilter) {
         if (Zombie.Type() == AFOOTBALL_ZOMBIE && Zombie.Hp() >= 90) { // 橄榄血条
             if (settings.FootballHP)
-                barPainter.Draw(ABar(Zombie.Abscissa() + 81, Zombie.Ordinate() + 69, 1580, Zombie.OneHp() + Zombie.Hp() - 90, {180}, 1, ABar::UP, 36, 6, 0xFF6D706C, 0xA0FFFFFF));
+                barPainter.Draw(ABar(Zombie.Abscissa() + 81, Zombie.Ordinate() + 69, 1580, Zombie.OneHp() + Zombie.Hp() - 90, {180}, 1, ABar::UP, 36, 6, settings.FootballHPARGB, 0xA0FFFFFF));
             ++FootballCount[Zombie.Row()]; // 橄榄实时统计
             if (Zombie.AtWave() == AGetMainObject()->Wave() - 1)
                 ++FootballThisWave[Zombie.Row()];
@@ -980,14 +1023,14 @@ void DrawInfo() {
     for (auto& Zombie : aAliveZombieFilter) {
         if (Zombie.Type() == AGARGANTUAR) // 白眼血条
             if (settings.GargHP)
-                barPainter.Draw(ABar(Zombie.Abscissa() + 49, Zombie.Ordinate() + 59, 3000, Zombie.Hp(), settings.HPStyle ? std::initializer_list<int> {1200} : std::initializer_list<int> {1500, 1800}, 1, ABar::UP, 40, 8, 0xFF9868BC, 0xA0FFFFFF));
+                barPainter.Draw(ABar(Zombie.Abscissa() + 49, Zombie.Ordinate() + 59, 3000, Zombie.Hp(), settings.HPStyle ? std::initializer_list<int> {1200} : std::initializer_list<int> {1500, 1800}, 1, ABar::UP, 40, 8, settings.GargHPARGB, 0xA0FFFFFF));
     }
     std::vector<int> GigaThisWave(6, 0);
     std::vector<int> GigaCount(6, 0);
     for (auto& Zombie : aAliveZombieFilter) {
         if (Zombie.Type() == AGIGA_GARGANTUAR) { // 红眼血条
             if (settings.GigaHP)
-                barPainter.Draw(ABar(Zombie.Abscissa() + 49, Zombie.Ordinate() + 79, 6000, Zombie.Hp(), settings.HPStyle ? std::initializer_list<int> {600, 2400, 4200} : std::initializer_list<int> {1800, 3000, 4800}, 1, ABar::UP, 80, 8, 0xFFFF0000, 0xA0FFFFFF));
+                barPainter.Draw(ABar(Zombie.Abscissa() + 49, Zombie.Ordinate() + 79, 6000, Zombie.Hp(), settings.HPStyle ? std::initializer_list<int> {600, 2400, 4200} : std::initializer_list<int> {1800, 3000, 4800}, 1, ABar::UP, 80, 8, settings.GigaHPARGB, 0xA0FFFFFF));
             ++GigaCount[Zombie.Row()]; // 红眼实时统计
             if (Zombie.AtWave() == AGetMainObject()->Wave() - 1)
                 ++GigaThisWave[Zombie.Row()];
@@ -998,17 +1041,17 @@ void DrawInfo() {
         for (auto& Zombie : aAliveZombieFilter) {
             if (Zombie.Type() == AJACK_IN_THE_BOX_ZOMBIE && Zombie.State() == 16 && JudgeExplode(&Plant, &Zombie) && settings.JackExplosionRange) {
                 if (Plant.Type() == ACOB_CANNON)
-                    backgroundPainter.Draw(ARect(Plant.Xi() + 4, Plant.Yi() + 25, 152, 11), 0x9AFF0000);
+                    backgroundPainter.Draw(ARect(Plant.Xi() + 4, Plant.Yi() + 25, 152, 11), settings.JackExplosionRangeARGB);
                 else if (Plant.Type() == ACOFFEE_BEAN)
-                    backgroundPainter.Draw(ARect(Plant.Xi() + 4, Plant.Yi() + 13, 72, 11), 0x9AFF0000);
+                    backgroundPainter.Draw(ARect(Plant.Xi() + 4, Plant.Yi() + 13, 72, 11), settings.JackExplosionRangeARGB);
                 else if (Plant.Type() == APUMPKIN)
-                    backgroundPainter.Draw(ARect(Plant.Xi() + 4, Plant.Yi() + 45, 72, 11), 0x9AFF0000);
+                    backgroundPainter.Draw(ARect(Plant.Xi() + 4, Plant.Yi() + 45, 72, 11), settings.JackExplosionRangeARGB);
                 else if (ARangeIn(Plant.Type(), {ALILY_PAD, AFLOWER_POT}))
-                    backgroundPainter.Draw(ARect(Plant.Xi() + 4, Plant.Yi() + 57, 72, 11), 0x9AFF0000);
+                    backgroundPainter.Draw(ARect(Plant.Xi() + 4, Plant.Yi() + 57, 72, 11), settings.JackExplosionRangeARGB);
                 else if (Plant.Type() == ASQUASH)
-                    backgroundPainter.Draw(ARect(Plant.Xi() + 4, Plant.Yi() + 25, 72, 11), 0x9AFF0000);
+                    backgroundPainter.Draw(ARect(Plant.Xi() + 4, Plant.Yi() + 25, 72, 11), settings.JackExplosionRangeARGB);
                 else
-                    backgroundPainter.Draw(ARect(MyColToX(Plant.Col() + 1) + 4, MyRowToY(Plant.Row() + 1, Plant.Col() + 1) + 25, 72, 11), 0x9AFF0000);
+                    backgroundPainter.Draw(ARect(MyColToX(Plant.Col() + 1) + 4, MyRowToY(Plant.Row() + 1, Plant.Col() + 1) + 25, 72, 11), settings.JackExplosionRangeARGB);
                 break;
             }
         }
@@ -1020,18 +1063,18 @@ void DrawInfo() {
             RectHeight = 0;
         int Plantoffset = Plant.Xi() - MyColToX(Plant.Col() + 1);
         if (Plantoffset > 0) {
-            backgroundPainter.Draw(ARect(MyColToX(Plant.Col() + 1) + 53 + 4, MyRowToY(Plant.Row() + 1, Plant.Col() + 1) + 25, 14, RectHeight), 0xFF4CAF50);
-            lowIndexPainter.Draw(AText("R" + std::to_string(Plantoffset), MyColToX(Plant.Col() + 1) + 52 + 4, MyRowToY(Plant.Row() + 1, Plant.Col() + 1) + 21), 0xFF000000);
+            backgroundPainter.Draw(ARect(MyColToX(Plant.Col() + 1) + 53 + 4, MyRowToY(Plant.Row() + 1, Plant.Col() + 1) + 25, 14, RectHeight), settings.OtherPlantHPARGB);
+            lowIndexPainter.Draw(AText(std::format("R{}", Plantoffset), MyColToX(Plant.Col() + 1) + 52 + 4, MyRowToY(Plant.Row() + 1, Plant.Col() + 1) + 21), 0xFF000000);
         }
         if (Plantoffset < 0) {
-            backgroundPainter.Draw(ARect(MyColToX(Plant.Col() + 1) + 5 + 4, MyRowToY(Plant.Row() + 1, Plant.Col() + 1) + 25, 14, RectHeight), 0xFF4CAF50);
-            lowIndexPainter.Draw(AText("L" + std::to_string(-Plantoffset), MyColToX(Plant.Col() + 1) + 4 + 4, MyRowToY(Plant.Row() + 1, Plant.Col() + 1) + 21), 0xFF000000);
+            backgroundPainter.Draw(ARect(MyColToX(Plant.Col() + 1) + 5 + 4, MyRowToY(Plant.Row() + 1, Plant.Col() + 1) + 25, 14, RectHeight), settings.OtherPlantHPARGB);
+            lowIndexPainter.Draw(AText(std::format("L{}", Plantoffset), MyColToX(Plant.Col() + 1) + 4 + 4, MyRowToY(Plant.Row() + 1, Plant.Col() + 1) + 21), 0xFF000000);
         }
     }
     // 有小丑开盒，绘制爆炸倒计时
     for (auto& Zombie : aAliveZombieFilter) {
         if (Zombie.Type() == AJACK_IN_THE_BOX_ZOMBIE && Zombie.State() == 16 && settings.JackCountdown)
-            barPainter.Draw(ABar(Zombie.Abscissa() + 65, Zombie.Ordinate() + 87, 110, Zombie.StateCountdown(), {100}, 1, ABar::UP, 55, 10, 0xFFFF69B4, 0xA0FFFFFF));
+            barPainter.Draw(ABar(Zombie.Abscissa() + 65, Zombie.Ordinate() + 87, 110, Zombie.StateCountdown(), {100}, 1, ABar::UP, 55, 10, settings.JackCountdownARGB, 0xA0FFFFFF));
     }
     for (int Row : {0, 1, 2, 3, 4, 5}) {
         if (AMRef<int>(0x6A9EC0, 0x768, 0x5D8 + Row * 0x4) != 1)
@@ -1040,18 +1083,18 @@ void DrawInfo() {
         auto Coordinate = MyGridToCoordinate(Row + 1, 0.5);
         int Ordinate = Coordinate.second;
         if (GigaCount[Row] && settings.GigaCount) { // 红眼实时统计绘制
-            std::string Giga = std::to_string(GigaThisWave[Row]) + "/" + std::to_string(GigaCount[Row]);
-            backgroundPainter.Draw(ARect(0, Ordinate + aFieldInfo.rowHeight / 2 + 3 - Height, Giga.size() * 9 + 2, 16), 0xFFFF0000);
+            std::string Giga = std::format("{}/{}", GigaThisWave[Row], GigaCount[Row]);
+            backgroundPainter.Draw(ARect(0, Ordinate + aFieldInfo.rowHeight / 2 + 3 - Height, Giga.size() * 9 + 2, 16), settings.GigaCountARGB);
             fightInfoPainter.Draw(AText(Giga, 0, Ordinate + aFieldInfo.rowHeight / 2 - Height), 0xFFFFFFFF);
         }
         if (ZomboniCount[Row] && settings.ZomboniCount) { // 冰车实时统计绘制
-            std::string Zomboni = std::to_string(ZomboniThisWave[Row]) + "/" + std::to_string(ZomboniCount[Row]);
-            backgroundPainter.Draw(ARect(0, Ordinate + aFieldInfo.rowHeight / 2 + 3, Zomboni.size() * 9 + 2, 16), 0xFF0040FF);
+            std::string Zomboni = std::format("{}/{}", ZomboniThisWave[Row], ZomboniCount[Row]);
+            backgroundPainter.Draw(ARect(0, Ordinate + aFieldInfo.rowHeight / 2 + 3, Zomboni.size() * 9 + 2, 16), settings.ZomboniCountARGB);
             fightInfoPainter.Draw(AText(Zomboni, 0, Ordinate + aFieldInfo.rowHeight / 2), 0xFFFFFFFF);
         }
         if (FootballCount[Row] && settings.FootballCount) { // 橄榄实时统计绘制
-            std::string Football = std::to_string(FootballThisWave[Row]) + "/" + std::to_string(FootballCount[Row]);
-            backgroundPainter.Draw(ARect(0, Ordinate + aFieldInfo.rowHeight / 2 + 3 + Height, Football.size() * 9 + 2, 16), 0xFF6D706C);
+            std::string Football = std::format("{}/{}", FootballThisWave[Row], FootballCount[Row]);
+            backgroundPainter.Draw(ARect(0, Ordinate + aFieldInfo.rowHeight / 2 + 3 + Height, Football.size() * 9 + 2, 16), settings.FootballCountARGB);
             fightInfoPainter.Draw(AText(Football, 0, Ordinate + aFieldInfo.rowHeight / 2 + Height), 0xFFFFFFFF);
         }
     }
@@ -1063,73 +1106,53 @@ void DrawInfo() {
                 ++GigaDistribution[Wave];
         GigaCumulativeDistribution[Wave] = Wave ? GigaCumulativeDistribution[Wave - 1] + GigaDistribution[Wave] : GigaDistribution[Wave];
     }
-    uint32_t GigaARGB = 0xFFFFFFFF;
-    uint32_t GigaBGARGB = 0xFFFF0000;
-    if (GigaCumulativeDistribution[AGetMainObject()->Wave() - 1] >= 50) {
-        GigaARGB = 0xFF0000FF;
-        GigaBGARGB = 0xFF9868BC;
-    }
     if (GigaCumulativeDistribution[20 - 1] && settings.GigaStat) { // 红眼出怪表统计绘制
-        backgroundPainter.Draw(ARect(19, 7, 61, 53), GigaBGARGB);
+        backgroundPainter.Draw(ARect(19, 7, 61, 53), GigaCumulativeDistribution[AGetMainObject()->Wave() - 1] < 50 ? settings.GigaStatARGB1 : settings.GigaStatARGB2);
         if (AGetMainObject()->Wave()) {
-            std::string Wave = "Wave";
-            std::string Sum = "Sum";
-            if (GigaDistribution[AGetMainObject()->Wave() - 1] < 10)
-                Wave = "Wave ";
-            if (GigaCumulativeDistribution[AGetMainObject()->Wave() - 1] < 10)
-                Sum = "Sum  ";
-            else if (GigaCumulativeDistribution[AGetMainObject()->Wave() - 1] < 100)
-                Sum = "Sum ";
-            GigaNumPainter.Draw(AText(Wave + std::to_string(GigaDistribution[AGetMainObject()->Wave() - 1]), 22, ShowInfoState ? 6 : 11), GigaARGB);
-            GigaNumPainter.Draw(AText(Sum + std::to_string(GigaCumulativeDistribution[AGetMainObject()->Wave() - 1]), 22, ShowInfoState ? 22 : 33), GigaARGB);
+            GigaNumPainter.Draw(AText(std::format("Wave{:2}", GigaDistribution[ANowWave(false) - 1]), 22, ShowInfoState ? 6 : 11), 0xFFFFFFFF);
+            GigaNumPainter.Draw(AText(std::format("Sum{:3}", GigaCumulativeDistribution[ANowWave(false) - 1]), 22, ShowInfoState ? 22 : 33), 0xFFFFFFFF);
         } else {
-            GigaNumPainter.Draw(AText("Wave 0", 22, ShowInfoState ? 6 : 11), GigaARGB);
-            GigaNumPainter.Draw(AText("Sum  0", 22, ShowInfoState ? 22 : 33), GigaARGB);
+            GigaNumPainter.Draw(AText("Wave 0", 22, ShowInfoState ? 6 : 11), 0xFFFFFFFF);
+            GigaNumPainter.Draw(AText("Sum  0", 22, ShowInfoState ? 22 : 33), 0xFFFFFFFF);
         }
-        if (ShowInfoState) {
-            std::string All = "All";
-            if (GigaCumulativeDistribution[20 - 1] < 10)
-                All = "All  ";
-            else if (GigaCumulativeDistribution[20 - 1] < 100)
-                All = "All ";
-            GigaNumPainter.Draw(AText(All + std::to_string(GigaCumulativeDistribution[20 - 1]), 22, 38), GigaARGB);
-        }
+        if (ShowInfoState)
+            GigaNumPainter.Draw(AText(std::format("All{:3}", GigaCumulativeDistribution[20 - 1]), 22, 38), 0xFFFFFFFF);
     }
     // 本波总血条
     if (settings.TotalHP) {
         if (AGetMainObject()->Wave() < 1)
-            barPainter.Draw(ABar(58, 574, 1, 0, {}, 1, ABar::RIGHT, 127, 24, 0xFF9868BC, 0xC0FFFFFF));
+            barPainter.Draw(ABar(58, 574, 1, 0, {}, 1, ABar::RIGHT, 127, 24, settings.TotalHPARGB1, 0xC0FFFFFF));
         else if (ARangeIn(AGetMainObject()->Wave(), {9, 19, 20}) || ShowInfoState)
-            barPainter.Draw(ABar(58, 574, AGetMainObject()->MRef<int>(0x5598), AAsm::ZombieTotalHp(ANowWave() - 1), {AGetMainObject()->ZombieRefreshHp()}, 1, ABar::RIGHT, 127, 24, RealCountdown() ? 0xFF6D706C : 0xFF9868BC, 0xC0FFFFFF));
+            barPainter.Draw(ABar(58, 574, AGetMainObject()->MRef<int>(0x5598), AAsm::ZombieTotalHp(ANowWave() - 1), {AGetMainObject()->ZombieRefreshHp()}, 1, ABar::RIGHT, 127, 24, RealCountdown() ? settings.TotalHPARGB2 : settings.TotalHPARGB1, 0xC0FFFFFF));
         else
-            barPainter.Draw(ABar(58, 574, AGetMainObject()->MRef<int>(0x5598), AAsm::ZombieTotalHp(ANowWave() - 1), {AGetMainObject()->MRef<int>(0x5598) * 13 / 20, AGetMainObject()->MRef<int>(0x5598) / 2}, 1, ABar::RIGHT, 127, 24, 0xFF9868BC, 0xC0FFFFFF));
+            barPainter.Draw(ABar(58, 574, AGetMainObject()->MRef<int>(0x5598), AAsm::ZombieTotalHp(ANowWave() - 1), {AGetMainObject()->MRef<int>(0x5598) * 13 / 20, AGetMainObject()->MRef<int>(0x5598) / 2}, 1, ABar::RIGHT, 127, 24, settings.TotalHPARGB1, 0xC0FFFFFF));
         // 波数时间
-        fightInfoPainter.Draw(AText((AGetMainObject()->Wave() < 10 ? "0" : "") + std::to_string(AGetMainObject()->Wave() ?: 1) + ",", 59, 575), 0xFF0000FF);
-        fightInfoPainter.Draw(AText(std::to_string(ANowTime(ANowWave()) == -2147483648 ? (AGetMainObject()->CompletedRounds() ? -600 : -1800) : ANowTime(ANowWave())), 82, 575), 0xFF0000FF);
-        fightInfoPainter.Draw(AText(RealCountdown() && (ARangeIn(AGetMainObject()->Wave(), {9, 19, 20}) || ShowInfoState) ? std::to_string(-RealCountdown()) : "", 145, 575), 0xFFFF0000);
+        fightInfoPainter.Draw(AText(std::format("{:02},", AGetMainObject()->Wave() ?: 1), 59, 575), 0xFF0000FF);
+        fightInfoPainter.Draw(AText(std::format("{}", ANowTime(ANowWave()) == -2147483648 ? (AGetMainObject()->CompletedRounds() ? -600 : -1800) : ANowTime(ANowWave())), 82, 575), 0xFF0000FF);
+        fightInfoPainter.Draw(AText(RealCountdown() && (ARangeIn(AGetMainObject()->Wave(), {9, 19, 20}) || ShowInfoState) ? std::format("{}", -RealCountdown()) : "", 145, 575), 0xFFFF0000);
     }
     // 波长记录
     for (int i = 0; i < settings.WavelengthRecord; ++i) {
         if (AGetMainObject()->Wave() - i > 0 && ANowTime(ANowWave() - i) > 0 && RealCountdown() && (ARangeIn(AGetMainObject()->Wave(), {9, 19, 20}) || ShowInfoState)) {
             barPainter.Draw(ABar(191 + 71 * i, 574, 1, 0, {}, 1, ABar::RIGHT, 65, 24, 0xFFFFC000, 0xC0FFFFFF));
-            fightInfoPainter.Draw(AText((AGetMainObject()->Wave() - i < 10 ? "0" : "") + std::to_string(AGetMainObject()->Wave() - i ?: 1) + ",", 193 + 71 * i, 575), 0xFF0000FF);
-            fightInfoPainter.Draw(AText(std::to_string(i ? ANowTime(ANowWave() - i) - ANowTime(ANowWave() + 1 - i) : ANowTime(ANowWave()) + RealCountdown()), 216 + 71 * i, 575), 0xFF0000FF);
+            fightInfoPainter.Draw(AText(std::format("{:02},", AGetMainObject()->Wave() - i ?: 1), 193 + 71 * i, 575), 0xFF0000FF);
+            fightInfoPainter.Draw(AText(std::format("{}", i ? ANowTime(ANowWave() - i) - ANowTime(ANowWave() + 1 - i) : ANowTime(ANowWave()) + RealCountdown()), 216 + 71 * i, 575), 0xFF0000FF);
         } else if (AGetMainObject()->Wave() - i > 1 && ANowTime(ANowWave() - 1 - i) > 0) {
             barPainter.Draw(ABar(191 + 71 * i, 574, 1, 0, {}, 1, ABar::RIGHT, 65, 24, 0xFFFFC000, 0xC0FFFFFF));
-            fightInfoPainter.Draw(AText((AGetMainObject()->Wave() - 1 - i < 10 ? "0" : "") + std::to_string(AGetMainObject()->Wave() - 1 - i ?: 1) + ",", 193 + 71 * i, 575), 0xFF0000FF);
-            fightInfoPainter.Draw(AText(std::to_string(ANowTime(ANowWave() - 1 - i) - ANowTime(ANowWave() - i)), 216 + 71 * i, 575), 0xFF0000FF);
+            fightInfoPainter.Draw(AText(std::format("{:02},", AGetMainObject()->Wave() - 1 - i ?: 1), 193 + 71 * i, 575), 0xFF0000FF);
+            fightInfoPainter.Draw(AText(std::format("{}", ANowTime(ANowWave() - 1 - i) - ANowTime(ANowWave() - i)), 216 + 71 * i, 575), 0xFF0000FF);
         }
     }
     // 显示倍速
     if (AGetPvzBase()->TickMs() != 10 && settings.ShowSpeed) {
-        barPainter.Draw(ABar(6, 574, 1, 1, {}, 1, ABar::RIGHT, 46, 24, AGetPvzBase()->TickMs() > 10 ? 0xFFFF0000 : 0xFF00FF00));
-        fightInfoPainter.Draw(AText(std::to_string(10 / AGetPvzBase()->TickMs()), 8, 575), 0xFF000000);
+        barPainter.Draw(ABar(6, 574, 1, 1, {}, 1, ABar::RIGHT, 46, 24, AGetPvzBase()->TickMs() > 10 ? settings.ShowSpeedARGB1 : settings.ShowSpeedARGB2));
+        fightInfoPainter.Draw(AText(std::format("{}", 10 / AGetPvzBase()->TickMs()), 8, 575), 0xFF000000);
         if (AGetPvzBase()->TickMs() == 1) {
             fightInfoPainter.Draw(AText(".", 26, 575), 0xFF000000);
             fightInfoPainter.Draw(AText("0", 30, 575), 0xFF000000);
         } else {
             fightInfoPainter.Draw(AText(".", 17, 575), 0xFF000000);
-            fightInfoPainter.Draw(AText(1000 / AGetPvzBase()->TickMs() % 100 ? std::to_string(1000 / AGetPvzBase()->TickMs() % 100) : "00", 21, 575), 0xFF000000);
+            fightInfoPainter.Draw(AText(1000 / AGetPvzBase()->TickMs() % 100 ? std::format("{}", 1000 / AGetPvzBase()->TickMs() % 100) : "00", 21, 575), 0xFF000000);
         }
         fightInfoPainter.Draw(AText("x", 39, 575), 0xFF000000);
     }
@@ -1170,46 +1193,46 @@ void DrawIndex() {
             int SizeOffset = 1;
             int FontSize = 2;
             if (Plant.Type() == ACOB_CANNON)
-                SegPainter.Draw(A7Seg(Plant.Index(), Plant.Xi() + 110 + DigitOffset + SizeOffset, Plant.Yi() + 26 + SizeOffset, FontSize, 1, 2), SizeOffset + 1, 0xFF0040FF, 0xFF4CAF50, settings.CobGloomHP ? RectHeight : 11);
+                SegPainter.Draw(A7Seg(Plant.Index(), Plant.Xi() + 110 + DigitOffset + SizeOffset, Plant.Yi() + 26 + SizeOffset, FontSize, 1, 2), SizeOffset + 1, 0xFF0040FF, settings.CobGloomHPARGB, settings.CobGloomHP ? RectHeight : 11);
             else if (Plant.Type() == AGLOOM_SHROOM)
-                SegPainter.Draw(A7Seg(Plant.Index(), Plant.Xi() + 30 + DigitOffset + SizeOffset, Plant.Yi() + 26 + SizeOffset, FontSize, 1, 2), SizeOffset + 1, 0xFF0040FF, 0xFF4CAF50, settings.CobGloomHP ? RectHeight : 11);
+                SegPainter.Draw(A7Seg(Plant.Index(), Plant.Xi() + 30 + DigitOffset + SizeOffset, Plant.Yi() + 26 + SizeOffset, FontSize, 1, 2), SizeOffset + 1, 0xFF0040FF, settings.CobGloomHPARGB, settings.CobGloomHP ? RectHeight : 11);
             else if (Plant.Type() == ACOFFEE_BEAN)
-                SegPainter.Draw(A7Seg(Plant.Index(), Plant.Xi() + 30 + DigitOffset + SizeOffset, Plant.Yi() + 14 + SizeOffset, FontSize, 1, 2), SizeOffset + 1, 0xFFFFFFFF, 0xFF965821, settings.OtherPlantHP ? RectHeight : 11);
+                SegPainter.Draw(A7Seg(Plant.Index(), Plant.Xi() + 30 + DigitOffset + SizeOffset, Plant.Yi() + 14 + SizeOffset, FontSize, 1, 2), SizeOffset + 1, 0xFF0040FF, settings.OtherPlantHPARGB, settings.OtherPlantHP ? RectHeight : 11);
             else if (ARangeIn(Plant.Type(), {AWALL_NUT, ATALL_NUT, ASPIKEROCK}))
-                SegPainter.Draw(A7Seg(Plant.Index(), Plant.Xi() + 30 + DigitOffset + SizeOffset, Plant.Yi() + 26 + SizeOffset, FontSize, 1, 2), SizeOffset + 1, 0xFF0040FF, 0xFF4CAF50, settings.NutSpikeHP ? RectHeight : 11);
+                SegPainter.Draw(A7Seg(Plant.Index(), Plant.Xi() + 30 + DigitOffset + SizeOffset, Plant.Yi() + 26 + SizeOffset, FontSize, 1, 2), SizeOffset + 1, 0xFF0040FF, settings.NutSpikeHPARGB, settings.NutSpikeHP ? RectHeight : 11);
             else if (Plant.Type() == APUMPKIN)
-                SegPainter.Draw(A7Seg(Plant.Index(), Plant.Xi() + 54 + DigitOffset + SizeOffset, Plant.Yi() + 46 + SizeOffset, FontSize, 1, 2), SizeOffset + 1, 0xFF0040FF, 0xFFFFA500, settings.PumpkinHP ? RectHeight : 11);
+                SegPainter.Draw(A7Seg(Plant.Index(), Plant.Xi() + 54 + DigitOffset + SizeOffset, Plant.Yi() + 46 + SizeOffset, FontSize, 1, 2), SizeOffset + 1, 0xFF0040FF, settings.PumpkinHPARGB, settings.PumpkinHP ? RectHeight : 11);
             else if (ARangeIn(Plant.Type(), {ALILY_PAD, AFLOWER_POT}))
-                SegPainter.Draw(A7Seg(Plant.Index(), Plant.Xi() + 6 + DigitOffset + SizeOffset, Plant.Yi() + 58 + SizeOffset, FontSize, 1, 2), SizeOffset + 1, 0xFF0040FF, 0xFF4CAF50, settings.LilyPotHP ? RectHeight : 11);
+                SegPainter.Draw(A7Seg(Plant.Index(), Plant.Xi() + 6 + DigitOffset + SizeOffset, Plant.Yi() + 58 + SizeOffset, FontSize, 1, 2), SizeOffset + 1, 0xFF0040FF, settings.LilyPotHPARGB, settings.LilyPotHP ? RectHeight : 11);
             else if (Plant.Type() == ASQUASH)
-                SegPainter.Draw(A7Seg(Plant.Index(), Plant.Xi() + 30 + DigitOffset + SizeOffset, Plant.Yi() + 26 + SizeOffset, FontSize, 1, 2), SizeOffset + 1, 0xFF0040FF, 0xFF4CAF50, settings.OtherPlantHP ? RectHeight : 11);
+                SegPainter.Draw(A7Seg(Plant.Index(), Plant.Xi() + 30 + DigitOffset + SizeOffset, Plant.Yi() + 26 + SizeOffset, FontSize, 1, 2), SizeOffset + 1, 0xFF0040FF, settings.OtherPlantHPARGB, settings.OtherPlantHP ? RectHeight : 11);
             else
-                SegPainter.Draw(A7Seg(Plant.Index(), MyColToX(Plant.Col() + 1) + 30 + DigitOffset + SizeOffset, MyRowToY(Plant.Row() + 1, Plant.Col() + 1) + 26 + SizeOffset, FontSize, 1, 2), SizeOffset + 1, 0xFF0040FF, 0xFF4CAF50, settings.OtherPlantHP ? RectHeight : 11);
+                SegPainter.Draw(A7Seg(Plant.Index(), MyColToX(Plant.Col() + 1) + 30 + DigitOffset + SizeOffset, MyRowToY(Plant.Row() + 1, Plant.Col() + 1) + 26 + SizeOffset, FontSize, 1, 2), SizeOffset + 1, 0xFF0040FF, settings.OtherPlantHPARGB, settings.OtherPlantHP ? RectHeight : 11);
         } else { // 可栈位垫，9像素黑色Arial
             if (Plant.Type() == ACOB_CANNON) {
-                backgroundPainter.Draw(ARect(Plant.Xi() + 109 + DigitOffset, Plant.Yi() + 25, RectWidth, settings.CobGloomHP ? RectHeight : 11), 0xFF4CAF50);
-                lowIndexPainter.Draw(AText(std::to_string(Plant.Index()), Plant.Xi() + 108 + DigitOffset, Plant.Yi() + 21), 0xFF000000);
+                backgroundPainter.Draw(ARect(Plant.Xi() + 109 + DigitOffset, Plant.Yi() + 25, RectWidth, settings.CobGloomHP ? RectHeight : 11), settings.CobGloomHPARGB);
+                lowIndexPainter.Draw(AText(std::format("{}", Plant.Index()), Plant.Xi() + 108 + DigitOffset, Plant.Yi() + 21), 0xFF000000);
             } else if (Plant.Type() == AGLOOM_SHROOM) {
-                backgroundPainter.Draw(ARect(Plant.Xi() + 29 + DigitOffset, Plant.Yi() + 25, RectWidth, settings.CobGloomHP ? RectHeight : 11), 0xFF4CAF50);
-                lowIndexPainter.Draw(AText(std::to_string(Plant.Index()), Plant.Xi() + 28 + DigitOffset, Plant.Yi() + 21), 0xFF000000);
+                backgroundPainter.Draw(ARect(Plant.Xi() + 29 + DigitOffset, Plant.Yi() + 25, RectWidth, settings.CobGloomHP ? RectHeight : 11), settings.CobGloomHPARGB);
+                lowIndexPainter.Draw(AText(std::format("{}", Plant.Index()), Plant.Xi() + 28 + DigitOffset, Plant.Yi() + 21), 0xFF000000);
             } else if (Plant.Type() == ACOFFEE_BEAN) {
-                backgroundPainter.Draw(ARect(Plant.Xi() + 29 + DigitOffset, Plant.Yi() + 13, RectWidth, settings.OtherPlantHP ? RectHeight : 11), 0xFF965821);
-                lowIndexPainter.Draw(AText(std::to_string(Plant.Index()), Plant.Xi() + 28 + DigitOffset, Plant.Yi() + 9), 0xFFFFFFFF);
+                backgroundPainter.Draw(ARect(Plant.Xi() + 29 + DigitOffset, Plant.Yi() + 13, RectWidth, settings.OtherPlantHP ? RectHeight : 11), settings.OtherPlantHPARGB);
+                lowIndexPainter.Draw(AText(std::format("{}", Plant.Index()), Plant.Xi() + 28 + DigitOffset, Plant.Yi() + 9), 0xFF000000);
             } else if (ARangeIn(Plant.Type(), {AWALL_NUT, ATALL_NUT, ASPIKEROCK})) {
-                backgroundPainter.Draw(ARect(Plant.Xi() + 29 + DigitOffset, Plant.Yi() + 25, RectWidth, settings.NutSpikeHP ? RectHeight : 11), 0xFF4CAF50);
-                lowIndexPainter.Draw(AText(std::to_string(Plant.Index()), Plant.Xi() + 28 + DigitOffset, Plant.Yi() + 21), 0xFF000000);
+                backgroundPainter.Draw(ARect(Plant.Xi() + 29 + DigitOffset, Plant.Yi() + 25, RectWidth, settings.NutSpikeHP ? RectHeight : 11), settings.NutSpikeHPARGB);
+                lowIndexPainter.Draw(AText(std::format("{}", Plant.Index()), Plant.Xi() + 28 + DigitOffset, Plant.Yi() + 21), 0xFF000000);
             } else if (Plant.Type() == APUMPKIN) {
-                backgroundPainter.Draw(ARect(Plant.Xi() + 53 + DigitOffset, Plant.Yi() + 45, RectWidth, settings.PumpkinHP ? RectHeight : 11), 0xFFFFA500);
-                lowIndexPainter.Draw(AText(std::to_string(Plant.Index()), Plant.Xi() + 52 + DigitOffset, Plant.Yi() + 41), 0xFF000000);
+                backgroundPainter.Draw(ARect(Plant.Xi() + 53 + DigitOffset, Plant.Yi() + 45, RectWidth, settings.PumpkinHP ? RectHeight : 11), settings.PumpkinHPARGB);
+                lowIndexPainter.Draw(AText(std::format("{}", Plant.Index()), Plant.Xi() + 52 + DigitOffset, Plant.Yi() + 41), 0xFF000000);
             } else if (ARangeIn(Plant.Type(), {ALILY_PAD, AFLOWER_POT})) {
-                backgroundPainter.Draw(ARect(Plant.Xi() + 5 + DigitOffset, Plant.Yi() + 57, RectWidth, settings.LilyPotHP ? RectHeight : 11), 0xFF4CAF50);
-                lowIndexPainter.Draw(AText(std::to_string(Plant.Index()), Plant.Xi() + 4 + DigitOffset, Plant.Yi() + 53), 0xFF000000);
+                backgroundPainter.Draw(ARect(Plant.Xi() + 5 + DigitOffset, Plant.Yi() + 57, RectWidth, settings.LilyPotHP ? RectHeight : 11), settings.LilyPotHPARGB);
+                lowIndexPainter.Draw(AText(std::format("{}", Plant.Index()), Plant.Xi() + 4 + DigitOffset, Plant.Yi() + 53), 0xFF000000);
             } else if (Plant.Type() == ASQUASH) {
-                backgroundPainter.Draw(ARect(Plant.Xi() + 29 + DigitOffset, Plant.Yi() + 25, RectWidth, settings.OtherPlantHP ? RectHeight : 11), 0xFF4CAF50);
-                lowIndexPainter.Draw(AText(std::to_string(Plant.Index()), Plant.Xi() + 28 + DigitOffset, Plant.Yi() + 21), 0xFF000000);
+                backgroundPainter.Draw(ARect(Plant.Xi() + 29 + DigitOffset, Plant.Yi() + 25, RectWidth, settings.OtherPlantHP ? RectHeight : 11), settings.OtherPlantHPARGB);
+                lowIndexPainter.Draw(AText(std::format("{}", Plant.Index()), Plant.Xi() + 28 + DigitOffset, Plant.Yi() + 21), 0xFF000000);
             } else {
-                backgroundPainter.Draw(ARect(MyColToX(Plant.Col() + 1) + 29 + DigitOffset, MyRowToY(Plant.Row() + 1, Plant.Col() + 1) + 25, RectWidth, settings.OtherPlantHP ? RectHeight : 11), 0xFF4CAF50);
-                lowIndexPainter.Draw(AText(std::to_string(Plant.Index()), MyColToX(Plant.Col() + 1) + 28 + DigitOffset, MyRowToY(Plant.Row() + 1, Plant.Col() + 1) + 21), 0xFF000000);
+                backgroundPainter.Draw(ARect(MyColToX(Plant.Col() + 1) + 29 + DigitOffset, MyRowToY(Plant.Row() + 1, Plant.Col() + 1) + 25, RectWidth, settings.OtherPlantHP ? RectHeight : 11), settings.OtherPlantHPARGB);
+                lowIndexPainter.Draw(AText(std::format("{}", Plant.Index()), MyColToX(Plant.Col() + 1) + 28 + DigitOffset, MyRowToY(Plant.Row() + 1, Plant.Col() + 1) + 21), 0xFF000000);
             }
         }
     }
@@ -1221,13 +1244,225 @@ void DrawIndex() {
     // 铲子栈位
     if (AGetMainObject()->PlantNext() < 10) {
         backgroundPainter.Draw(ARect(634, 8, 19, 26), 0xFF4CAF50);
-        nextIndexPainter.Draw(AText(std::to_string(AGetMainObject()->PlantNext()), 634, 2), 0xFF000000);
+        nextIndexPainter.Draw(AText(std::format("{}", AGetMainObject()->PlantNext()), 634, 2), 0xFF000000);
     } else if (AGetMainObject()->PlantNext() < 100) {
         backgroundPainter.Draw(ARect(626, 8, 35, 26), 0xFF4CAF50);
-        nextIndexPainter.Draw(AText(std::to_string(AGetMainObject()->PlantNext()), 626, 2), 0xFF000000);
+        nextIndexPainter.Draw(AText(std::format("{}", AGetMainObject()->PlantNext()), 626, 2), 0xFF000000);
     } else {
         backgroundPainter.Draw(ARect(618, 8, 51, 26), 0xFF4CAF50);
-        nextIndexPainter.Draw(AText(std::to_string(AGetMainObject()->PlantNext()), 618, 2), 0xFF000000);
+        nextIndexPainter.Draw(AText(std::format("{}", AGetMainObject()->PlantNext()), 618, 2), 0xFF000000);
+    }
+}
+
+// 六路种植相关代码
+// 鼠标座标转换成格子
+int MouseXToCol(int X) { return (X + 65) / 80; }
+int MouseXYToRow(int X, int Y) {
+    int Col = (X + 65) / 80;
+    if (aFieldInfo.rowHeight == 100)
+        return (Y + 55) / 100;
+    else if (aFieldInfo.isRoof)
+        return (Y + 40 - (Col < 5 ? (5 - Col) * 20 : 0)) / 85; // 天台
+    return (Y + 40) / 85;
+}
+// 土炮点击扣阳光种植回冷却函数
+void ClickSunPlantCd(int Type, int Row, int Col) {
+    AAsm::MouseClick(0, 0, 1);
+    AGetMainObject()->Sun() -= AAsm::GetSeedSunVal(Type >= 49 ? 48 : Type, Type - 49);
+    AAsm::PutPlant(Row - 1, Col - 1, static_cast<APlantType>(Type));
+    for (auto&& Seed : ABasicFilter<ASeed>()) {
+        if ((Type >= 49 ? Seed.ImitatorType() : Seed.Type()) == (Type >= 49 ? Type - 49 : Type)) {
+            Seed.InitialCd() = AMRef<int>(0x69F2B0 + 0x14 + 0x24 * (Type >= 49 ? Type - 49 : Type));
+            Seed.IsUsable() = false;
+            Seed.MRef<bool>(0x49 + 0x28) = true;
+            ++Seed.MRef<int>(0x4C + 0x28);
+        }
+    }
+}
+// 对六路或屋顶水路的格子进行操作
+void PlantShovelFireForbiddenGrid() {
+    int Row = MouseXYToRow(AGetMainObject()->MouseAttribution()->MRef<int>(0x8), AGetMainObject()->MouseAttribution()->MRef<int>(0xC));
+    int Col = MouseXToCol(AGetMainObject()->MouseAttribution()->MRef<int>(0x8));
+    int MousePlant = AGetMainObject()->MouseAttribution()->MRef<int>(0x28);
+    int MouseMPlant = AGetMainObject()->MouseAttribution()->MRef<int>(0x2C);
+    // 屋顶水路种植
+    if (MousePlant != -1 && (AGetPlantPtr(Row, Col, ALILY_PAD) || AGetPlantPtr(Row, Col, ACATTAIL))) {
+        switch (MousePlant) {
+        case AGATLING_PEA:
+            if (!AGetPlantPtr(Row, Col, AREPEATER))
+                break;
+            AAsm::RemovePlant(AGetPlantPtr(Row, Col, AREPEATER));
+            ClickSunPlantCd(MousePlant, Row, Col);
+            break;
+        case ATWIN_SUNFLOWER:
+            if (!AGetPlantPtr(Row, Col, ASUNFLOWER))
+                break;
+            AAsm::RemovePlant(AGetPlantPtr(Row, Col, ASUNFLOWER));
+            ClickSunPlantCd(MousePlant, Row, Col);
+            break;
+        case AGLOOM_SHROOM:
+            if (!AGetPlantPtr(Row, Col, AFUME_SHROOM))
+                break;
+            AAsm::RemovePlant(AGetPlantPtr(Row, Col, AFUME_SHROOM));
+            ClickSunPlantCd(MousePlant, Row, Col);
+            break;
+        case ACATTAIL:
+            if (!AGetPlantPtr(Row, Col, ALILY_PAD))
+                break;
+            AAsm::RemovePlant(AGetPlantPtr(Row, Col, ALILY_PAD));
+            ClickSunPlantCd(MousePlant, Row, Col);
+            break;
+        case AWINTER_MELON:
+            if (!AGetPlantPtr(Row, Col, AMELON_PULT))
+                break;
+            AAsm::RemovePlant(AGetPlantPtr(Row, Col, AMELON_PULT));
+            ClickSunPlantCd(MousePlant, Row, Col);
+            break;
+        case AGOLD_MAGNET:
+            if (!AGetPlantPtr(Row, Col, AMAGNET_SHROOM))
+                break;
+            AAsm::RemovePlant(AGetPlantPtr(Row, Col, AMAGNET_SHROOM));
+            ClickSunPlantCd(MousePlant, Row, Col);
+            break;
+        case ASPIKEROCK:
+            if (!AGetPlantPtr(Row, Col, ASPIKEWEED))
+                break;
+            AAsm::RemovePlant(AGetPlantPtr(Row, Col, ASPIKEWEED));
+            ClickSunPlantCd(MousePlant, Row, Col);
+            break;
+        case ACOB_CANNON:
+            if (!AGetPlantPtr(Row, Col, AKERNEL_PULT) || !AGetPlantPtr(Row, Col + 1, AKERNEL_PULT))
+                break;
+            AAsm::RemovePlant(AGetPlantPtr(Row, Col, AKERNEL_PULT));
+            AAsm::RemovePlant(AGetPlantPtr(Row, Col + 1, AKERNEL_PULT));
+            ClickSunPlantCd(MousePlant, Row, Col);
+            break;
+        case AIMITATOR:
+            if (MouseMPlant != APUMPKIN && AGetPlantPtr(Row, Col))
+                break;
+            if (MouseMPlant == AWALL_NUT && AGetPlantPtr(Row, Col, AWALL_NUT))
+                AAsm::RemovePlant(AGetPlantPtr(Row, Col, AWALL_NUT));
+            if (MouseMPlant == ATALL_NUT && AGetPlantPtr(Row, Col, ATALL_NUT))
+                AAsm::RemovePlant(AGetPlantPtr(Row, Col, ATALL_NUT));
+            if (MouseMPlant == APUMPKIN && AGetPlantPtr(Row, Col, APUMPKIN))
+                AAsm::RemovePlant(AGetPlantPtr(Row, Col, APUMPKIN));
+            ClickSunPlantCd(MouseMPlant + 49, Row, Col);
+            break;
+        default:
+            if (MousePlant != APUMPKIN && AGetPlantPtr(Row, Col))
+                break;
+            if (MousePlant == AWALL_NUT && AGetPlantPtr(Row, Col, AWALL_NUT))
+                AAsm::RemovePlant(AGetPlantPtr(Row, Col, AWALL_NUT));
+            if (MousePlant == ATALL_NUT && AGetPlantPtr(Row, Col, ATALL_NUT))
+                AAsm::RemovePlant(AGetPlantPtr(Row, Col, ATALL_NUT));
+            if (MousePlant == APUMPKIN && AGetPlantPtr(Row, Col, APUMPKIN))
+                AAsm::RemovePlant(AGetPlantPtr(Row, Col, APUMPKIN));
+            ClickSunPlantCd(MousePlant, Row, Col);
+            break;
+        }
+        return;
+    }
+    // 六路铲除点炮种植
+    if (Row != 6)
+        return;
+    // 铲除
+    if (AGetMainObject()->MouseAttribution()->Type() == 6) {
+        if (AGetPlantPtr(Row, Col))
+            AAsm::RemovePlant(AGetPlantPtr(Row, Col));
+        else if (AGetPlantPtr(Row, Col, APUMPKIN))
+            AAsm::RemovePlant(AGetPlantPtr(Row, Col, APUMPKIN));
+        else if (AGetPlantPtr(Row, Col, ALILY_PAD))
+            AAsm::RemovePlant(AGetPlantPtr(Row, Col, ALILY_PAD));
+        else if (AGetPlantPtr(Row, Col, AFLOWER_POT))
+            AAsm::RemovePlant(AGetPlantPtr(Row, Col, AFLOWER_POT));
+        return;
+    }
+    // 点炮
+    if (AGetCobRecoverTime(AGetPlantIndex(Row, Col, ACOB_CANNON)) == 0) {
+        AGetMainObject()->MouseAttribution()->Type() = 8;
+        AGetMainObject()->MouseAttribution()->CannonAddress() = AGetPlantPtr(Row, Col, ACOB_CANNON)->Id();
+        return;
+    }
+    if (AGetCobRecoverTime(AGetPlantIndex(Row, Col - 1, ACOB_CANNON)) == 0) {
+        AGetMainObject()->MouseAttribution()->Type() = 8;
+        AGetMainObject()->MouseAttribution()->CannonAddress() = AGetPlantPtr(Row, Col - 1, ACOB_CANNON)->Id();
+        return;
+    }
+    // 种植
+    if (MousePlant == -1)
+        return;
+    if (MousePlant != AIMITATOR && AAsm::GetPlantRejectType(MousePlant, Row - 1, Col - 1) != AAsm::NIL)
+        return;
+    if (MousePlant == AIMITATOR && AAsm::GetPlantRejectType(MouseMPlant, Row - 1, Col - 1) != AAsm::NIL)
+        return;
+    switch (MousePlant) {
+    case AGATLING_PEA:
+        if (!AGetPlantPtr(Row, Col, AREPEATER))
+            break;
+        AAsm::RemovePlant(AGetPlantPtr(Row, Col, AREPEATER));
+        ClickSunPlantCd(MousePlant, Row, Col);
+        break;
+    case ATWIN_SUNFLOWER:
+        if (!AGetPlantPtr(Row, Col, ASUNFLOWER))
+            break;
+        AAsm::RemovePlant(AGetPlantPtr(Row, Col, ASUNFLOWER));
+        ClickSunPlantCd(MousePlant, Row, Col);
+        break;
+    case AGLOOM_SHROOM:
+        if (!AGetPlantPtr(Row, Col, AFUME_SHROOM))
+            break;
+        AAsm::RemovePlant(AGetPlantPtr(Row, Col, AFUME_SHROOM));
+        ClickSunPlantCd(MousePlant, Row, Col);
+        break;
+    case ACATTAIL:
+        if (!AGetPlantPtr(Row, Col, ALILY_PAD))
+            break;
+        AAsm::RemovePlant(AGetPlantPtr(Row, Col, ALILY_PAD));
+        ClickSunPlantCd(MousePlant, Row, Col);
+        break;
+    case AWINTER_MELON:
+        if (!AGetPlantPtr(Row, Col, AMELON_PULT))
+            break;
+        AAsm::RemovePlant(AGetPlantPtr(Row, Col, AMELON_PULT));
+        ClickSunPlantCd(MousePlant, Row, Col);
+        break;
+    case AGOLD_MAGNET:
+        if (!AGetPlantPtr(Row, Col, AMAGNET_SHROOM))
+            break;
+        AAsm::RemovePlant(AGetPlantPtr(Row, Col, AMAGNET_SHROOM));
+        ClickSunPlantCd(MousePlant, Row, Col);
+        break;
+    case ASPIKEROCK:
+        if (!AGetPlantPtr(Row, Col, ASPIKEWEED))
+            break;
+        AAsm::RemovePlant(AGetPlantPtr(Row, Col, ASPIKEWEED));
+        ClickSunPlantCd(MousePlant, Row, Col);
+        break;
+    case ACOB_CANNON:
+        if (!AGetPlantPtr(Row, Col, AKERNEL_PULT) || !AGetPlantPtr(Row, Col + 1, AKERNEL_PULT))
+            break;
+        AAsm::RemovePlant(AGetPlantPtr(Row, Col, AKERNEL_PULT));
+        AAsm::RemovePlant(AGetPlantPtr(Row, Col + 1, AKERNEL_PULT));
+        ClickSunPlantCd(MousePlant, Row, Col);
+        break;
+    case AIMITATOR:
+        if (MouseMPlant == AWALL_NUT && AGetPlantPtr(Row, Col, AWALL_NUT))
+            AAsm::RemovePlant(AGetPlantPtr(Row, Col, AWALL_NUT));
+        if (MouseMPlant == ATALL_NUT && AGetPlantPtr(Row, Col, ATALL_NUT))
+            AAsm::RemovePlant(AGetPlantPtr(Row, Col, ATALL_NUT));
+        if (MouseMPlant == APUMPKIN && AGetPlantPtr(Row, Col, APUMPKIN))
+            AAsm::RemovePlant(AGetPlantPtr(Row, Col, APUMPKIN));
+        ClickSunPlantCd(MouseMPlant + 49, Row, Col);
+        break;
+    default:
+        if (MousePlant == AWALL_NUT && AGetPlantPtr(Row, Col, AWALL_NUT))
+            AAsm::RemovePlant(AGetPlantPtr(Row, Col, AWALL_NUT));
+        if (MousePlant == ATALL_NUT && AGetPlantPtr(Row, Col, ATALL_NUT))
+            AAsm::RemovePlant(AGetPlantPtr(Row, Col, ATALL_NUT));
+        if (MousePlant == APUMPKIN && AGetPlantPtr(Row, Col, APUMPKIN))
+            AAsm::RemovePlant(AGetPlantPtr(Row, Col, APUMPKIN));
+        ClickSunPlantCd(MousePlant, Row, Col);
+        break;
     }
 }
 
@@ -1247,36 +1482,44 @@ void Restart() {
 }
 // 回档几帧
 void func8() {
-    if (SnapshotModeSwitch)
-        return;
-    Paused = true;
-    PausedSlowed = false;
-    ASetAdvancedPause(Paused, false, 0);
-    aReplay.ShowOneTick(aReplay.GetEndIdx() - settings.tickRewindCount >= 0 ? aReplay.GetRecordIdx() - settings.tickRewindCount : aReplay.GetStartIdx());
+    if (aReplay.GetState() == aReplay.PLAYING) {
+        aReplay.Pause();
+        aReplay.ShowOneTick(aReplay.GetPlayIdx() - settings.tickRewindCount);
+    } else {
+        Paused = true;
+        PausedSlowed = false;
+        ASetAdvancedPause(Paused, false, 0);
+        aReplay.ShowOneTick(aReplay.GetRecordIdx() - settings.tickRewindCount);
+    }
 }
 // 高级暂停
 void func9() {
-    if (SnapshotModeSwitch)
-        return;
-    if (PausedCd < 480)
-        return;
-    Paused = !Paused;
-    PausedSlowed = false;
-    ASetAdvancedPause(Paused, false, 0);
+    if (aReplay.GetState() == aReplay.PLAYING) {
+        aReplay.IsPaused() ? aReplay.GoOn() : aReplay.Pause();
+    } else {
+        if (PausedCd < 480)
+            return;
+        Paused = !Paused;
+        PausedSlowed = false;
+        ASetAdvancedPause(Paused, false, 0);
+    }
 }
 // 下一帧
 void func10() {
-    if (SnapshotModeSwitch)
-        return;
-    if (PausedCd < 480)
-        return;
-    Paused = false;
-    PausedSlowed = false;
-    ASetAdvancedPause(Paused, false, 0);
-    AConnect(ANowDelayTime(1), [] {
-        Paused = !Paused;
+    if (aReplay.GetState() == aReplay.PLAYING) {
+        aReplay.Pause();
+        aReplay.ShowOneTick(aReplay.GetPlayIdx() + 1);
+    } else {
+        if (PausedCd < 480)
+            return;
+        Paused = false;
+        PausedSlowed = false;
         ASetAdvancedPause(Paused, false, 0);
-    });
+        AConnect(ANowDelayTime(1), [] {
+            Paused = !Paused;
+            ASetAdvancedPause(Paused, false, 0);
+        });
+    }
 }
 
 // 卡槽置顶
@@ -1375,6 +1618,7 @@ void func31() { AMRef<int>(0x6A9EC0, 0x768, 0x34) -= 5; }
 void func32() { AMRef<int>(0x6A9EC0, 0x768, 0x34) += 5; }
 void func33() { AMRef<int>(0x6A9EC0, 0x768, 0x30) -= 5; }
 void func34() { AMRef<int>(0x6A9EC0, 0x768, 0x30) += 5; }
+
 // 辅助开关
 void OneKeySwitch() {
     ATASSwitch = !ATASSwitch;
@@ -1403,7 +1647,6 @@ void ResetGame() {
     ASetAdvancedPause(false, false, 0);
     Paused = false;
     PausedSlowed = false;
-    SnapshotModeSwitch = false;
     AMRef<int>(0x6A9EC0, 0x768, 0x30) = 0;
     AMRef<int>(0x6A9EC0, 0x768, 0x34) = 0;
     AGetPvzBase()->TickMs() = 10;
@@ -1468,7 +1711,7 @@ void Warning(const std::string& tip) {
 void Lock(int userId, int gameID, int state) {
     if (state == -1)
         return;
-    auto Dataname = "game" + std::to_string(userId) + "_" + std::to_string(gameID) + ".dat";
+    auto Dataname = std::format("game{}_{}.dat", userId, gameID);
     auto filePath = std::filesystem::path(GAME_DATA_PATH + Dataname);
     if (!std::filesystem::exists(filePath)) {
         Info("文件" + filePath.string() + "不存在");
@@ -1500,12 +1743,10 @@ std::string GetCurTimeStr() {
 }
 
 std::string OpenFileDialog(const std::string& initPath) {
-    // 动态加载 comdlg32.dll
     HMODULE hComDlg = LoadLibraryW(L"comdlg32.dll");
     if (!hComDlg)
         return "";
 
-    // 定义 GetOpenFileNameW 的函数指针类型并获取函数地址
     typedef BOOL(WINAPI * PFN_GetOpenFileNameW)(LPOPENFILENAMEW);
     PFN_GetOpenFileNameW pGetOpenFileNameW = (PFN_GetOpenFileNameW)GetProcAddress(hComDlg, "GetOpenFileNameW");
     if (!pGetOpenFileNameW) {
@@ -1518,7 +1759,7 @@ std::string OpenFileDialog(const std::string& initPath) {
 
     OPENFILENAMEW openFileName = {};
     openFileName.lStructSize = sizeof(OPENFILENAMEW);
-    openFileName.nMaxFile = MAX_PATH; // 这个必须设置，否则不会显示打开文件对话框
+    openFileName.nMaxFile = MAX_PATH;
     openFileName.lpstrFilter = L"回放文件 (*.7z)\0\0";
     openFileName.lpstrFile = szFileName;
     openFileName.nFilterIndex = 1;
@@ -1530,7 +1771,6 @@ std::string OpenFileDialog(const std::string& initPath) {
         result = AWStrToStr(openFileName.lpstrFile);
     }
 
-    // 卸载 DLL
     FreeLibrary(hComDlg);
     return result;
 }
@@ -1538,46 +1778,40 @@ std::string OpenFileDialog(const std::string& initPath) {
 constexpr static int MAIN_WIDTH = 640;
 constexpr static int MAIN_HEIGHT = 480;
 
-AMainWindow mainWindow("A-TAS 4.0 " + std::to_string(A_TAS_VERSION), MAIN_WIDTH, MAIN_HEIGHT);
+AMainWindow mainWindow(std::format("A-TAS 4.0 {}", A_TAS_VERSION), MAIN_WIDTH, MAIN_HEIGHT);
 
 // 回放函数
 struct {
     AOperation startPlayOp = [] {
-        FightUiCheck();
-        if (aReplay.GetState() == AReplay::PLAYING) {
-            Warning("正在播放");
-            return;
-        }
-        if (settings.AutoStop)
-            aReplay.Stop();
-        auto fileName = OpenFileDialog(settings.savePath);
-        if (fileName.empty())
-            return;
-        compressor->SetFilePath(fileName);
-        aReplay.StartPlay();
-        Info("Replay : 开始播放");
     };
     AOperation startRecordOp = [] {
-        FightUiCheck();
-        if (aReplay.GetState() == AReplay::RECORDING) {
-            Warning("正在录制");
-            return;
-        }
-        if (settings.AutoStop)
-            aReplay.Stop();
-        compressor->SetFilePath(settings.savePath + std::string("/") + GetCurTimeStr() + ".7z");
-        aReplay.StartRecord(std::round(settings.recordTickInterval));
-        Info("Replay : 开始录制");
     };
     AOperation pauseOp = [] {
-        FightUiCheck();
-        if (aReplay.IsPaused())
-            aReplay.GoOn();
-        else
-            aReplay.Pause();
     };
     AOperation stopOp = [] {
         aReplay.Stop();
+    };
+    AOperation nextTickOp = [] {
+        FightUiCheck();
+        if (aReplay.GetState() == aReplay.RECORDING) {
+            ASetAdvancedPause(true);
+        }
+        aReplay.Pause();
+        if (aReplay.GetState() == AReplay::PLAYING) {
+            aReplay.ShowOneTick(aReplay.GetPlayIdx() + 1);
+        }
+    };
+    AOperation preTickOp = [] {
+        FightUiCheck();
+        if (aReplay.GetState() == aReplay.RECORDING) {
+            ASetAdvancedPause(true);
+        }
+        aReplay.Pause();
+        if (aReplay.GetState() == AReplay::RECORDING) {
+            aReplay.ShowOneTick(aReplay.GetRecordIdx() - 1);
+        } else {
+            aReplay.ShowOneTick(aReplay.GetPlayIdx() - 1);
+        }
     };
 } replayOp;
 
@@ -1588,33 +1822,10 @@ void CreateReplayGroup(AWindow* window, int LeftEdge, int TopEdge) {
 
     int y = TopEdge;
     int x = LeftEdge;
-    window->AddLabel("", x, y, 4 * (SPACE + WIDTH) + SPACE, (SPACE + HEIGHT) * 6);
+    window->AddLabel("", x, y, 4 * (SPACE + WIDTH) + SPACE, (SPACE + HEIGHT) * 7);
 
     x += SPACE;
     window->AddLabel("回放:    必须录制才能回档", x, y, WIDTH * 2 + SPACE, HEIGHT);
-    x += (SPACE + WIDTH) * 2;
-    auto autoRecordBox = window->AddCheckBox("游戏开始时自动录制", x, y, WIDTH * 2, HEIGHT);
-    autoRecordBox->SetCheck(settings.AutoRecordOnGameStart);
-
-    autoRecordBox->Connect([=] { settings.AutoRecordOnGameStart = autoRecordBox->GetCheck(); });
-
-    // 下一行
-    y += SPACE + HEIGHT;
-    x = LeftEdge;
-
-    x += SPACE;
-    auto startPlayBtn = window->AddPushButton("📂选择回放", x, y, WIDTH, HEIGHT);
-    x += SPACE + WIDTH;
-    auto startRecordBtn = window->AddPushButton("⏺️开始录制", x, y, WIDTH, HEIGHT);
-    x += SPACE + WIDTH;
-    auto pauseBtn = window->AddPushButton("⏯️暂停/继续", x, y, WIDTH, HEIGHT);
-    x += SPACE + WIDTH;
-    auto stopBtn = window->AddPushButton("⏹️停止", x, y, WIDTH, HEIGHT);
-
-    startPlayBtn->Connect(replayOp.startPlayOp);
-    startRecordBtn->Connect(replayOp.startRecordOp);
-    pauseBtn->Connect(replayOp.pauseOp);
-    stopBtn->Connect(replayOp.stopOp);
 
     // 下一行
     y += SPACE + HEIGHT;
@@ -1624,8 +1835,8 @@ void CreateReplayGroup(AWindow* window, int LeftEdge, int TopEdge) {
     auto showMouseBox = window->AddCheckBox("显示鼠标", x, y, WIDTH, HEIGHT);
     showMouseBox->SetCheck(settings.ShowMouse);
     x += SPACE + WIDTH;
-    auto autoStopBox = window->AddCheckBox("切换时停止", x, y, WIDTH, HEIGHT);
-    autoStopBox->SetCheck(settings.AutoStop);
+    auto autoRecordBox = window->AddCheckBox("开始时录制", x, y, WIDTH, HEIGHT);
+    autoRecordBox->SetCheck(settings.AutoRecordOnGameStart);
     x += SPACE + WIDTH;
     auto interpolateBox = window->AddCheckBox("播放时补帧", x, y, WIDTH, HEIGHT);
     interpolateBox->SetCheck(settings.Interpolate);
@@ -1637,8 +1848,8 @@ void CreateReplayGroup(AWindow* window, int LeftEdge, int TopEdge) {
         settings.ShowMouse = showMouseBox->GetCheck();
         aReplay.SetMouseVisible(settings.ShowMouse);
     });
-    autoStopBox->Connect([=] {
-        settings.AutoStop = autoStopBox->GetCheck();
+    autoRecordBox->Connect([=] {
+        settings.AutoRecordOnGameStart = autoRecordBox->GetCheck();
     });
     interpolateBox->Connect([=] {
         settings.Interpolate = interpolateBox->GetCheck();
@@ -1653,17 +1864,112 @@ void CreateReplayGroup(AWindow* window, int LeftEdge, int TopEdge) {
     x = LeftEdge;
 
     x += SPACE;
+    auto startPlayBtn = window->AddPushButton("📂选择回放", x, y, WIDTH, HEIGHT);
+    x += SPACE + WIDTH;
+    auto startRecordBtn = window->AddPushButton("⏺️开始录制", x, y, WIDTH, HEIGHT);
+    x += SPACE + WIDTH;
+    auto pauseBtn = window->AddPushButton("⏯️播放/暂停", x, y, WIDTH, HEIGHT);
+    x += SPACE + WIDTH;
+    auto stopBtn = window->AddPushButton("⏹️停止", x, y, WIDTH, HEIGHT);
+
+    startPlayBtn->Connect([=] {
+        if (AGetPvzBase()->GameUi() != AAsm::PLAYING)
+            EnterGame(AAsm::CHALLENGE_ICE);
+        FightUiCheck();
+        if (aReplay.GetState() != aReplay.REST)
+            aReplay.Stop();
+        auto fileName = OpenFileDialog(settings.savePath);
+        if (fileName.empty())
+            return;
+        compressor->SetFilePath(fileName);
+        aReplay.StartPlay();
+        Info("Replay : 开始播放");
+    });
+    startRecordBtn->Connect([=] {
+        FightUiCheck();
+        if (aReplay.GetState() != aReplay.REST)
+            aReplay.Stop();
+        compressor->SetFilePath(settings.savePath + std::string("/") + GetCurTimeStr() + ".7z");
+        aReplay.StartRecord(std::round(settings.recordTickInterval));
+        Info("Replay : 开始录制");
+    });
+    pauseBtn->Connect([=] {
+        FightUiCheck();
+        func9();
+    });
+    stopBtn->Connect([=] {
+        aReplay.Stop();
+    });
+
+    // 下一行
+    y += SPACE + HEIGHT;
+    x = LeftEdge;
+
+    x += SPACE;
+    auto firstTickBtn = window->AddPushButton("⏮️首帧", x, y, WIDTH, HEIGHT);
+    x += SPACE + WIDTH;
+    auto preTickBtn = window->AddPushButton("⏪上一帧", x, y, WIDTH, HEIGHT);
+    x += SPACE + WIDTH;
+    auto nextTickBtn = window->AddPushButton("⏩下一帧", x, y, WIDTH, HEIGHT);
+    x += SPACE + WIDTH;
+    auto lastTickBtn = window->AddPushButton("⏭️末帧", x, y, WIDTH, HEIGHT);
+
+    firstTickBtn->Connect([=] {
+        FightUiCheck();
+        if (aReplay.GetState() == AReplay::PLAYING) {
+            aReplay.Pause();
+            aReplay.ShowOneTick(aReplay.GetStartIdx());
+        } else {
+            Paused = true;
+            PausedSlowed = false;
+            ASetAdvancedPause(Paused, false, 0);
+            aReplay.ShowOneTick(aReplay.GetStartIdx());
+        }
+    });
+    preTickBtn->Connect([=] {
+        FightUiCheck();
+        if (aReplay.GetState() == aReplay.PLAYING) {
+            aReplay.Pause();
+            aReplay.ShowOneTick(aReplay.GetPlayIdx() - 1);
+        } else {
+            Paused = true;
+            PausedSlowed = false;
+            ASetAdvancedPause(Paused, false, 0);
+            aReplay.ShowOneTick(aReplay.GetRecordIdx() - 1);
+        }
+    });
+    nextTickBtn->Connect([=] {
+        FightUiCheck();
+        func10();
+    });
+    lastTickBtn->Connect([=] {
+        FightUiCheck();
+        if (aReplay.GetState() == AReplay::PLAYING) {
+            aReplay.Pause();
+            aReplay.ShowOneTick(aReplay.GetEndIdx() - 1);
+        } else {
+            Paused = true;
+            PausedSlowed = false;
+            ASetAdvancedPause(Paused, false, 0);
+        }
+    });
+
+    // 下一行
+    y += SPACE + HEIGHT;
+    x = LeftEdge;
+
+    x += SPACE;
     window->AddLabel("存档精度(每隔多少cs存一次档):", x, y, WIDTH * 2 + SPACE, HEIGHT);
     x += (SPACE + WIDTH) * 2;
-    auto tickIntervalEdit = window->AddEdit(std::to_string(settings.recordTickInterval), x, y, WIDTH, HEIGHT, ES_NUMBER | ES_CENTER);
+    auto tickIntervalEdit = window->AddEdit(std::format("{}", settings.recordTickInterval), x, y, WIDTH, HEIGHT, ES_NUMBER | ES_CENTER);
     x += SPACE + WIDTH;
     auto tickIntervalBtn = window->AddPushButton("设置", x, y, WIDTH, HEIGHT);
     tickIntervalBtn->Connect([=] {
-        auto tickInterval = stoi(tickIntervalEdit->GetText());
         if (aReplay.GetState() != aReplay.REST) {
             Warning("回放正在工作，无法设置精度");
             return;
         };
+        auto tickInterval = stoi(tickIntervalEdit->GetText());
         if (tickInterval < 1) {
             Warning("精度最小为 1 帧");
             tickInterval = 1;
@@ -1679,7 +1985,7 @@ void CreateReplayGroup(AWindow* window, int LeftEdge, int TopEdge) {
     x += SPACE;
     window->AddLabel("回档个数(每按一次要回几个档):", x, y, WIDTH * 2 + SPACE, HEIGHT);
     x += (SPACE + WIDTH) * 2;
-    auto tickRewindCountEdit = window->AddEdit(std::to_string(settings.tickRewindCount), x, y, WIDTH, HEIGHT, ES_NUMBER | ES_CENTER);
+    auto tickRewindCountEdit = window->AddEdit(std::format("{}", settings.tickRewindCount), x, y, WIDTH, HEIGHT, ES_NUMBER | ES_CENTER);
     x += SPACE + WIDTH;
     auto tickRewindCountBtn = window->AddPushButton("设置", x, y, WIDTH, HEIGHT);
     tickRewindCountBtn->Connect([=] {
@@ -1717,81 +2023,28 @@ void CreateReplayGroup(AWindow* window, int LeftEdge, int TopEdge) {
     });
 }
 
+static uint32_t HexToUL(const std::string& text, uint32_t originalVal) {
+    if (text.empty())
+        return originalVal;
+    try {
+        return std::stoul(text, nullptr, 16);
+    } catch (...) {
+        return originalVal;
+    }
+}
+
 void CreateShowInfoGroup(AWindow* window, int LeftEdge, int TopEdge) {
     constexpr static int SPACE = 5;
     constexpr static int WIDTH = 100;
     constexpr static int HEIGHT = 25;
-    constexpr static int BTNWIDTH = 75;
+    constexpr static int BTNWIDTH = 90;
+    constexpr static int EDITWIDTH = 100;
 
     int y = TopEdge;
     int x = LeftEdge;
-    window->AddLabel("", x, y, 194, (SPACE + HEIGHT) * 12);
+    window->AddLabel("", x, y, 624, 362);
 
     x += SPACE;
-    window->AddLabel("显示信息", x, y, BTNWIDTH, HEIGHT);
-
-    y += SPACE + HEIGHT;
-
-    auto CobCDBox = window->AddCheckBox("炮冷却条", x, y, BTNWIDTH, HEIGHT);
-    CobCDBox->SetCheck(settings.CobCD);
-    CobCDBox->Connect([=] { settings.CobCD = CobCDBox->GetCheck(); });
-
-    y += SPACE + HEIGHT;
-    auto CobGloomHPBox = window->AddCheckBox("炮曾血条", x, y, BTNWIDTH, HEIGHT);
-    CobGloomHPBox->SetCheck(settings.CobGloomHP);
-    CobGloomHPBox->Connect([=] { settings.CobGloomHP = CobGloomHPBox->GetCheck(); });
-
-    y += SPACE + HEIGHT;
-    auto PumpkinHPBox = window->AddCheckBox("南瓜血条", x, y, BTNWIDTH, HEIGHT);
-    PumpkinHPBox->SetCheck(settings.PumpkinHP);
-    PumpkinHPBox->Connect([=] { settings.PumpkinHP = PumpkinHPBox->GetCheck(); });
-
-    y += SPACE + HEIGHT;
-
-    auto OtherPlantHPBox = window->AddCheckBox("其他植物血条", x, y, 110, HEIGHT);
-    OtherPlantHPBox->SetCheck(settings.OtherPlantHP);
-    OtherPlantHPBox->Connect([=] { settings.OtherPlantHP = OtherPlantHPBox->GetCheck(); });
-
-    y += SPACE + HEIGHT;
-
-    auto CraterBox = window->AddCheckBox("核坑冷却", x, y, BTNWIDTH, HEIGHT);
-    CraterBox->SetCheck(settings.Crater);
-    CraterBox->Connect([=] { settings.Crater = CraterBox->GetCheck(); });
-
-    y += SPACE + HEIGHT;
-    auto HPStyleBox = window->AddCheckBox("炮阵样式", x, y, BTNWIDTH, HEIGHT);
-    HPStyleBox->SetCheck(settings.HPStyle);
-    HPStyleBox->Connect([=] { settings.HPStyle = HPStyleBox->GetCheck(); });
-
-    y += SPACE + HEIGHT;
-    auto GigaHPBox = window->AddCheckBox("红眼血条", x, y, BTNWIDTH, HEIGHT);
-    GigaHPBox->SetCheck(settings.GigaHP);
-    GigaHPBox->Connect([=] { settings.GigaHP = GigaHPBox->GetCheck(); });
-
-    y += SPACE + HEIGHT;
-    auto GargHPBox = window->AddCheckBox("白眼血条", x, y, BTNWIDTH, HEIGHT);
-    GargHPBox->SetCheck(settings.GargHP);
-    GargHPBox->Connect([=] { settings.GargHP = GargHPBox->GetCheck(); });
-
-    y += SPACE + HEIGHT;
-    auto FootballHPBox = window->AddCheckBox("橄榄血条", x, y, BTNWIDTH, HEIGHT);
-    FootballHPBox->SetCheck(settings.FootballHP);
-    FootballHPBox->Connect([=] { settings.FootballHP = FootballHPBox->GetCheck(); });
-
-    y += SPACE + HEIGHT;
-    auto JackCountdownBox = window->AddCheckBox("小丑炸条", x, y, BTNWIDTH, HEIGHT);
-    JackCountdownBox->SetCheck(settings.JackCountdown);
-    JackCountdownBox->Connect([=] { settings.JackCountdown = JackCountdownBox->GetCheck(); });
-
-    y += SPACE + HEIGHT;
-    auto TotalHPBox = window->AddCheckBox("本波总血条", x, y, 100, HEIGHT);
-    TotalHPBox->SetCheck(settings.TotalHP);
-    TotalHPBox->Connect([=] { settings.TotalHP = TotalHPBox->GetCheck(); });
-
-    // 下一列
-    x = LeftEdge + SPACE * 2 + WIDTH;
-    y = TopEdge;
-
     auto ShowMeBox = window->AddCheckBox("悬停显示", x, y, BTNWIDTH, HEIGHT);
     ShowMeBox->SetCheck(settings.ShowMe);
     ShowMeBox->Connect([=] {
@@ -1803,70 +2056,186 @@ void CreateShowInfoGroup(AWindow* window, int LeftEdge, int TopEdge) {
     });
 
     y += SPACE + HEIGHT;
-    auto PlantOffsetBox = window->AddCheckBox("小喷偏移", x, y, BTNWIDTH, HEIGHT);
-    PlantOffsetBox->SetCheck(settings.PlantOffset);
-    PlantOffsetBox->Connect([=] { settings.PlantOffset = PlantOffsetBox->GetCheck(); });
+
+    auto CobCDBox = window->AddCheckBox("炮冷却条", x, y, BTNWIDTH, HEIGHT);
+    CobCDBox->SetCheck(settings.CobCD);
+    CobCDBox->Connect([=] { settings.CobCD = CobCDBox->GetCheck(); });
+    auto CobCDARGBEdit = window->AddEdit(std::format("{:08X}", settings.CobCDARGB), x + BTNWIDTH, y, EDITWIDTH, HEIGHT, ES_CENTER);
 
     y += SPACE + HEIGHT;
-    auto LilyPotHPBox = window->AddCheckBox("荷盆血条", x, y, BTNWIDTH, HEIGHT);
-    LilyPotHPBox->SetCheck(settings.LilyPotHP);
-    LilyPotHPBox->Connect([=] { settings.LilyPotHP = LilyPotHPBox->GetCheck(); });
+    auto CobGloomHPBox = window->AddCheckBox("炮曾血条", x, y, BTNWIDTH, HEIGHT);
+    CobGloomHPBox->SetCheck(settings.CobGloomHP);
+    CobGloomHPBox->Connect([=] { settings.CobGloomHP = CobGloomHPBox->GetCheck(); });
+    auto CobGloomHPARGBEdit = window->AddEdit(std::format("{:08X}", settings.CobGloomHPARGB), x + BTNWIDTH, y, EDITWIDTH, HEIGHT, ES_CENTER);
+
+    y += SPACE + HEIGHT;
+    auto PumpkinHPBox = window->AddCheckBox("南瓜血条", x, y, BTNWIDTH, HEIGHT);
+    PumpkinHPBox->SetCheck(settings.PumpkinHP);
+    PumpkinHPBox->Connect([=] { settings.PumpkinHP = PumpkinHPBox->GetCheck(); });
+    auto PumpkinHPARGBEdit = window->AddEdit(std::format("{:08X}", settings.PumpkinHPARGB), x + BTNWIDTH, y, EDITWIDTH, HEIGHT, ES_CENTER);
 
     y += SPACE + HEIGHT;
     auto NutSpikeHPBox = window->AddCheckBox("坚刺血条", x, y, BTNWIDTH, HEIGHT);
     NutSpikeHPBox->SetCheck(settings.NutSpikeHP);
     NutSpikeHPBox->Connect([=] { settings.NutSpikeHP = NutSpikeHPBox->GetCheck(); });
+    auto NutSpikeHPARGBEdit = window->AddEdit(std::format("{:08X}", settings.NutSpikeHPARGB), x + BTNWIDTH, y, EDITWIDTH, HEIGHT, ES_CENTER);
 
     y += SPACE + HEIGHT;
+    auto LilyPotHPBox = window->AddCheckBox("荷盆血条", x, y, BTNWIDTH, HEIGHT);
+    LilyPotHPBox->SetCheck(settings.LilyPotHP);
+    LilyPotHPBox->Connect([=] { settings.LilyPotHP = LilyPotHPBox->GetCheck(); });
+    auto LilyPotHPARGBEdit = window->AddEdit(std::format("{:08X}", settings.LilyPotHPARGB), x + BTNWIDTH, y, EDITWIDTH, HEIGHT, ES_CENTER);
 
     y += SPACE + HEIGHT;
-    auto IcetrailBox = window->AddCheckBox("冰道冷却", x, y, BTNWIDTH, HEIGHT);
-    IcetrailBox->SetCheck(settings.Icetrail);
-    IcetrailBox->Connect([=] { settings.Icetrail = IcetrailBox->GetCheck(); });
-
-    y += SPACE + HEIGHT;
-    auto GigaStatBox = window->AddCheckBox("红眼统计", x, y, BTNWIDTH, HEIGHT);
-    GigaStatBox->SetCheck(settings.GigaStat);
-    GigaStatBox->Connect([=] { settings.GigaStat = GigaStatBox->GetCheck(); });
-
-    y += SPACE + HEIGHT;
-    auto GigaCountBox = window->AddCheckBox("红眼数量", x, y, BTNWIDTH, HEIGHT);
-    GigaCountBox->SetCheck(settings.GigaCount);
-    GigaCountBox->Connect([=] { settings.GigaCount = GigaCountBox->GetCheck(); });
-
-    y += SPACE + HEIGHT;
-    auto ZomboniCountBox = window->AddCheckBox("冰车数量", x, y, BTNWIDTH, HEIGHT);
-    ZomboniCountBox->SetCheck(settings.ZomboniCount);
-    ZomboniCountBox->Connect([=] { settings.ZomboniCount = ZomboniCountBox->GetCheck(); });
-
-    y += SPACE + HEIGHT;
-    auto FootballCountBox = window->AddCheckBox("橄榄数量", x, y, BTNWIDTH, HEIGHT);
-    FootballCountBox->SetCheck(settings.FootballCount);
-    FootballCountBox->Connect([=] { settings.FootballCount = FootballCountBox->GetCheck(); });
+    auto OtherPlantHPBox = window->AddCheckBox("其他血条", x, y, BTNWIDTH, HEIGHT);
+    OtherPlantHPBox->SetCheck(settings.OtherPlantHP);
+    OtherPlantHPBox->Connect([=] { settings.OtherPlantHP = OtherPlantHPBox->GetCheck(); });
+    auto OtherPlantHPARGBEdit = window->AddEdit(std::format("{:08X}", settings.OtherPlantHPARGB), x + BTNWIDTH, y, EDITWIDTH, HEIGHT, ES_CENTER);
 
     y += SPACE + HEIGHT;
     auto JackExplosionRangeBox = window->AddCheckBox("受炸提示", x, y, BTNWIDTH, HEIGHT);
     JackExplosionRangeBox->SetCheck(settings.JackExplosionRange);
     JackExplosionRangeBox->Connect([=] { settings.JackExplosionRange = JackExplosionRangeBox->GetCheck(); });
+    auto JackExplosionRangeARGBEdit = window->AddEdit(std::format("{:08X}", settings.JackExplosionRangeARGB), x + BTNWIDTH, y, EDITWIDTH, HEIGHT, ES_CENTER);
+
+    y += SPACE + HEIGHT;
+    auto IcetrailBox = window->AddCheckBox("冰道冷却", x, y, BTNWIDTH, HEIGHT);
+    IcetrailBox->SetCheck(settings.Icetrail);
+    IcetrailBox->Connect([=] { settings.Icetrail = IcetrailBox->GetCheck(); });
+    auto IcetrailARGBEdit = window->AddEdit(std::format("{:08X}", settings.IcetrailARGB), x + BTNWIDTH, y, EDITWIDTH, HEIGHT, ES_CENTER);
+
+    y += SPACE + HEIGHT;
+    auto CraterBox = window->AddCheckBox("核坑冷却", x, y, BTNWIDTH, HEIGHT);
+    CraterBox->SetCheck(settings.Crater);
+    CraterBox->Connect([=] { settings.Crater = CraterBox->GetCheck(); });
+    auto CraterARGBEdit = window->AddEdit(std::format("{:08X}", settings.CraterARGB), x + BTNWIDTH, y, EDITWIDTH, HEIGHT, ES_CENTER);
+
+    y += SPACE + HEIGHT;
+
+    y += SPACE + HEIGHT;
+
+    // 下一列
+    x = LeftEdge + SPACE + 105;
+    y = TopEdge;
+    auto PlantOffsetBox = window->AddCheckBox("小喷偏移", x, y, BTNWIDTH, HEIGHT);
+    PlantOffsetBox->SetCheck(settings.PlantOffset);
+    PlantOffsetBox->Connect([=] { settings.PlantOffset = PlantOffsetBox->GetCheck(); });
+
+    // 下一列
+    x = LeftEdge + SPACE + 210;
+    y = TopEdge;
+
+    auto HPStyleBox = window->AddCheckBox("炮阵样式", x, y, BTNWIDTH, HEIGHT);
+    HPStyleBox->SetCheck(settings.HPStyle);
+    HPStyleBox->Connect([=] { settings.HPStyle = HPStyleBox->GetCheck(); });
+
+    y += SPACE + HEIGHT;
+    auto GigaHPBox = window->AddCheckBox("红眼血条", x, y, BTNWIDTH, HEIGHT);
+    GigaHPBox->SetCheck(settings.GigaHP);
+    GigaHPBox->Connect([=] { settings.GigaHP = GigaHPBox->GetCheck(); });
+    auto GigaHPARGBEdit = window->AddEdit(std::format("{:08X}", settings.GigaHPARGB), x + BTNWIDTH, y, EDITWIDTH, HEIGHT, ES_CENTER);
+
+    y += SPACE + HEIGHT;
+    auto GargHPBox = window->AddCheckBox("白眼血条", x, y, BTNWIDTH, HEIGHT);
+    GargHPBox->SetCheck(settings.GargHP);
+    GargHPBox->Connect([=] { settings.GargHP = GargHPBox->GetCheck(); });
+    auto GargHPARGBEdit = window->AddEdit(std::format("{:08X}", settings.GargHPARGB), x + BTNWIDTH, y, EDITWIDTH, HEIGHT, ES_CENTER);
+
+    y += SPACE + HEIGHT;
+    auto FootballHPBox = window->AddCheckBox("橄榄血条", x, y, BTNWIDTH, HEIGHT);
+    FootballHPBox->SetCheck(settings.FootballHP);
+    FootballHPBox->Connect([=] { settings.FootballHP = FootballHPBox->GetCheck(); });
+    auto FootballHPARGBEdit = window->AddEdit(std::format("{:08X}", settings.FootballHPARGB), x + BTNWIDTH, y, EDITWIDTH, HEIGHT, ES_CENTER);
+
+    y += SPACE + HEIGHT;
+    auto GigaCountBox = window->AddCheckBox("红眼数量", x, y, BTNWIDTH, HEIGHT);
+    GigaCountBox->SetCheck(settings.GigaCount);
+    GigaCountBox->Connect([=] { settings.GigaCount = GigaCountBox->GetCheck(); });
+    auto GigaCountARGBEdit = window->AddEdit(std::format("{:08X}", settings.GigaCountARGB), x + BTNWIDTH, y, EDITWIDTH, HEIGHT, ES_CENTER);
+
+    y += SPACE + HEIGHT;
+    auto ZomboniCountBox = window->AddCheckBox("冰车数量", x, y, BTNWIDTH, HEIGHT);
+    ZomboniCountBox->SetCheck(settings.ZomboniCount);
+    ZomboniCountBox->Connect([=] { settings.ZomboniCount = ZomboniCountBox->GetCheck(); });
+    auto ZomboniCountARGBEdit = window->AddEdit(std::format("{:08X}", settings.ZomboniCountARGB), x + BTNWIDTH, y, EDITWIDTH, HEIGHT, ES_CENTER);
+
+    y += SPACE + HEIGHT;
+    auto FootballCountBox = window->AddCheckBox("橄榄数量", x, y, BTNWIDTH, HEIGHT);
+    FootballCountBox->SetCheck(settings.FootballCount);
+    FootballCountBox->Connect([=] { settings.FootballCount = FootballCountBox->GetCheck(); });
+    auto FootballCountARGBEdit = window->AddEdit(std::format("{:08X}", settings.FootballCountARGB), x + BTNWIDTH, y, EDITWIDTH, HEIGHT, ES_CENTER);
+
+    y += SPACE + HEIGHT;
+    auto JackCountdownBox = window->AddCheckBox("小丑炸条", x, y, BTNWIDTH, HEIGHT);
+    JackCountdownBox->SetCheck(settings.JackCountdown);
+    JackCountdownBox->Connect([=] { settings.JackCountdown = JackCountdownBox->GetCheck(); });
+    auto JackCountdownARGBEdit = window->AddEdit(std::format("{:08X}", settings.JackCountdownARGB), x + BTNWIDTH, y, EDITWIDTH, HEIGHT, ES_CENTER);
+
+    y += SPACE + HEIGHT;
+    auto GigaStatBox = window->AddCheckBox("红眼统计", x, y, BTNWIDTH, HEIGHT);
+    GigaStatBox->SetCheck(settings.GigaStat);
+    GigaStatBox->Connect([=] { settings.GigaStat = GigaStatBox->GetCheck(); });
+    auto GigaStatARGB1Edit = window->AddEdit(std::format("{:08X}", settings.GigaStatARGB1), x + BTNWIDTH, y, EDITWIDTH, HEIGHT, ES_CENTER);
+    auto GigaStatARGB2Edit = window->AddEdit(std::format("{:08X}", settings.GigaStatARGB2), x + BTNWIDTH + SPACE + EDITWIDTH, y, EDITWIDTH, HEIGHT, ES_CENTER);
+
+    y += SPACE + HEIGHT;
+    auto TotalHPBox = window->AddCheckBox("本波血条", x, y, 100, HEIGHT);
+    TotalHPBox->SetCheck(settings.TotalHP);
+    TotalHPBox->Connect([=] { settings.TotalHP = TotalHPBox->GetCheck(); });
+    auto TotalHPARGB1Edit = window->AddEdit(std::format("{:08X}", settings.TotalHPARGB1), x + BTNWIDTH, y, EDITWIDTH, HEIGHT, ES_CENTER);
+    auto TotalHPARGB2Edit = window->AddEdit(std::format("{:08X}", settings.TotalHPARGB2), x + BTNWIDTH + SPACE + EDITWIDTH, y, EDITWIDTH, HEIGHT, ES_CENTER);
 
     y += SPACE + HEIGHT;
     auto ShowSpeedBox = window->AddCheckBox("显示倍速", x, y, BTNWIDTH, HEIGHT);
     ShowSpeedBox->SetCheck(settings.ShowSpeed);
     ShowSpeedBox->Connect([=] { settings.ShowSpeed = ShowSpeedBox->GetCheck(); });
+    auto ShowSpeedARGB1Edit = window->AddEdit(std::format("{:08X}", settings.ShowSpeedARGB1), x + BTNWIDTH, y, EDITWIDTH, HEIGHT, ES_CENTER);
+    auto ShowSpeedARGB2Edit = window->AddEdit(std::format("{:08X}", settings.ShowSpeedARGB2), x + BTNWIDTH + SPACE + EDITWIDTH, y, EDITWIDTH, HEIGHT, ES_CENTER);
+
+    y += SPACE + HEIGHT;
+
+    // 下一列
+    x = LeftEdge + SPACE + 305;
+    y = TopEdge;
+
+    auto ApplyAllBtn = window->AddPushButton("一键改色", x, y, BTNWIDTH, HEIGHT);
+    ApplyAllBtn->Connect([=] {
+        settings.CobCDARGB = HexToUL(CobCDARGBEdit->GetText(), settings.CobCDARGB);
+        settings.CobGloomHPARGB = HexToUL(CobGloomHPARGBEdit->GetText(), settings.CobGloomHPARGB);
+        settings.PumpkinHPARGB = HexToUL(PumpkinHPARGBEdit->GetText(), settings.PumpkinHPARGB);
+        settings.NutSpikeHPARGB = HexToUL(NutSpikeHPARGBEdit->GetText(), settings.NutSpikeHPARGB);
+        settings.LilyPotHPARGB = HexToUL(LilyPotHPARGBEdit->GetText(), settings.LilyPotHPARGB);
+        settings.OtherPlantHPARGB = HexToUL(OtherPlantHPARGBEdit->GetText(), settings.OtherPlantHPARGB);
+        settings.JackExplosionRangeARGB = HexToUL(JackExplosionRangeARGBEdit->GetText(), settings.JackExplosionRangeARGB);
+        settings.IcetrailARGB = HexToUL(IcetrailARGBEdit->GetText(), settings.IcetrailARGB);
+        settings.CraterARGB = HexToUL(CraterARGBEdit->GetText(), settings.CraterARGB);
+        settings.GigaHPARGB = HexToUL(GigaHPARGBEdit->GetText(), settings.GigaHPARGB);
+        settings.GargHPARGB = HexToUL(GargHPARGBEdit->GetText(), settings.GargHPARGB);
+        settings.FootballHPARGB = HexToUL(FootballHPARGBEdit->GetText(), settings.FootballHPARGB);
+        settings.GigaCountARGB = HexToUL(GigaCountARGBEdit->GetText(), settings.GigaCountARGB);
+        settings.ZomboniCountARGB = HexToUL(ZomboniCountARGBEdit->GetText(), settings.ZomboniCountARGB);
+        settings.FootballCountARGB = HexToUL(FootballCountARGBEdit->GetText(), settings.FootballCountARGB);
+        settings.JackCountdownARGB = HexToUL(JackCountdownARGBEdit->GetText(), settings.JackCountdownARGB);
+        settings.GigaStatARGB1 = HexToUL(GigaStatARGB1Edit->GetText(), settings.GigaStatARGB1);
+        settings.GigaStatARGB2 = HexToUL(GigaStatARGB2Edit->GetText(), settings.GigaStatARGB2);
+        settings.TotalHPARGB1 = HexToUL(TotalHPARGB1Edit->GetText(), settings.TotalHPARGB1);
+        settings.TotalHPARGB2 = HexToUL(TotalHPARGB2Edit->GetText(), settings.TotalHPARGB2);
+        settings.ShowSpeedARGB1 = HexToUL(ShowSpeedARGB1Edit->GetText(), settings.ShowSpeedARGB1);
+        settings.ShowSpeedARGB2 = HexToUL(ShowSpeedARGB2Edit->GetText(), settings.ShowSpeedARGB2);
+        Info("所有颜色设置已保存");
+    });
 }
 
 AWindow* BasicPageWindow(int pageX, int pageY) {
     auto window = mainWindow.AddWindow(pageX, pageY);
 
     constexpr static int SPACE = 5;
-    constexpr static int WIDTH = 100;
+    // constexpr static int WIDTH = 100;
     constexpr static int HEIGHT = 25;
     constexpr static int BTNWIDTH = 75;
 
     int x = SPACE;
     int y = 0;
-
-    CreateShowInfoGroup(window, x + WIDTH * 4 + SPACE * 6, y);
 
     window->AddLabel("", x, y, BTNWIDTH, HEIGHT);
     window->AddLabel("速度档位", x + SPACE, y, BTNWIDTH - SPACE, HEIGHT);
@@ -1882,7 +2251,7 @@ AWindow* BasicPageWindow(int pageX, int pageY) {
     x += BTNWIDTH + SPACE;
     auto WavelengthRecordComboBox = window->AddComboBox(x, y, 50, 500);
     WavelengthRecordComboBox->AddString("0", "1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11", "12", "13", "14", "15", "16", "17", "18", "19", "20");
-    WavelengthRecordComboBox->SetText(std::to_string(settings.WavelengthRecord));
+    WavelengthRecordComboBox->SetText(std::format("{}", settings.WavelengthRecord));
 
     x += WavelengthRecordComboBox->GetWidth() + SPACE;
 
@@ -1891,7 +2260,7 @@ AWindow* BasicPageWindow(int pageX, int pageY) {
     x += BTNWIDTH + SPACE;
     auto SkipTickWaveComboBox = window->AddComboBox(x, y, 50, 500);
     SkipTickWaveComboBox->AddString("0", "1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11", "12", "13", "14", "15", "16", "17", "18", "19", "20");
-    SkipTickWaveComboBox->SetText(std::to_string(settings.SkipTickWave));
+    SkipTickWaveComboBox->SetText(std::format("{}", settings.SkipTickWave));
 
     x += SkipTickWaveComboBox->GetWidth() + SPACE;
 
@@ -1940,6 +2309,18 @@ AWindow* BasicPageWindow(int pageX, int pageY) {
     x = SPACE;
     y += SPACE + HEIGHT;
     CreateReplayGroup(window, x, y);
+
+    return window;
+}
+
+AWindow* DisplayPageWindow(int pageX, int pageY) {
+    auto window = mainWindow.AddWindow(pageX, pageY);
+
+    constexpr static int SPACE = 5;
+    int x = SPACE;
+    int y = 0;
+
+    CreateShowInfoGroup(window, x, y);
 
     return window;
 }
@@ -2250,6 +2631,96 @@ AWindow* SpawnPageWindow(int pageX, int pageY) {
     return window;
 }
 
+// 场地魔改
+void StageModify() {
+    if (settings.Row6Plant)
+        for (int i = 0; i < 9; ++i)
+            AGetMainObject()->MRef<uint32_t>(0x17C + 0x18 * i) = 1; // 六路一到九列为可种
+    if (settings.Row6Spawn)
+        AGetMainObject()->MRef<uint32_t>(0x5EC) = 1; // 六路为陆路
+    if (settings.SmallPool)
+        for (int i = 5; i < 9; ++i) {
+            AGetMainObject()->MRef<uint32_t>(0x170 + 0x18 * i) = 3; // 三路六到九列为泳池
+            AGetMainObject()->MRef<uint32_t>(0x174 + 0x18 * i) = 3; // 四路六到九列为泳池
+        }
+    if (settings.NormalPool)
+        for (int i = 0; i < 9; ++i) {
+            AGetMainObject()->MRef<uint32_t>(0x170 + 0x18 * i) = 3; // 三路一到九列为泳池
+            AGetMainObject()->MRef<uint32_t>(0x174 + 0x18 * i) = 3; // 四路一到九列为泳池
+        }
+    if (settings.Row34PoolSpawn) {
+        AGetMainObject()->MRef<uint32_t>(0x5E0) = 2; // 三路为水路
+        AGetMainObject()->MRef<uint32_t>(0x5E4) = 2; // 四路为水路
+    }
+    if (settings.SnorkelDolphinSpawn) {
+        *(uint8_t*)0x425733 = AGetMainObject()->Scene(); // 让屋顶可以出海豚和潜水
+        *(uint8_t*)0x425738 = AGetMainObject()->Scene(); // 让屋顶可以出海豚和潜水
+    } else {
+        *(uint8_t*)0x425733 = 0x02; // 恢复
+        *(uint8_t*)0x425738 = 0x03; // 恢复
+    }
+}
+
+void CreateStageModifyGroup(AWindow* window, int LeftEdge, int TopEdge) {
+    // constexpr static int SPACE = 5;
+    // // constexpr static int WIDTH = 100;
+    // constexpr static int HEIGHT = 25;
+    // constexpr static int BTNWIDTH = 75;
+
+    // int y = TopEdge;
+    // int x = LeftEdge;
+    // window->AddLabel("", x, y, 194, (SPACE + HEIGHT) * 12);
+
+    // x += SPACE;
+    // window->AddLabel("场地魔改", x, y, BTNWIDTH, HEIGHT);
+
+    // y += SPACE + HEIGHT;
+    // auto Row6PlantBox = window->AddCheckBox("六路种植", x, y, BTNWIDTH, HEIGHT);
+    // Row6PlantBox->SetCheck(settings.Row6Plant);
+    // Row6PlantBox->Connect([=] { settings.Row6Plant = Row6PlantBox->GetCheck(); });
+
+    // y += SPACE + HEIGHT;
+    // auto Row6SpawnBox = window->AddCheckBox("六路出怪", x, y, BTNWIDTH, HEIGHT);
+    // Row6SpawnBox->SetCheck(settings.Row6Spawn);
+    // Row6SpawnBox->Connect([=] { settings.Row6Spawn = Row6SpawnBox->GetCheck(); });
+
+    // y += SPACE + HEIGHT;
+    // auto SmallPoolBox = window->AddCheckBox("迷你泳池", x, y, BTNWIDTH, HEIGHT);
+    // SmallPoolBox->SetCheck(settings.SmallPool);
+    // SmallPoolBox->Connect([=] { settings.SmallPool = SmallPoolBox->GetCheck(); });
+
+    // y += SPACE + HEIGHT;
+    // auto NormalPoolBox = window->AddCheckBox("正常泳池", x, y, BTNWIDTH, HEIGHT);
+    // NormalPoolBox->SetCheck(settings.NormalPool);
+    // NormalPoolBox->Connect([=] { settings.NormalPool = NormalPoolBox->GetCheck(); });
+
+    // y += SPACE + HEIGHT;
+    // auto Row34PoolSpawnBox = window->AddCheckBox("将三四路设为水路", x, y, 150, HEIGHT);
+    // Row34PoolSpawnBox->SetCheck(settings.Row34PoolSpawn);
+    // Row34PoolSpawnBox->Connect([=] { settings.Row34PoolSpawn = Row34PoolSpawnBox->GetCheck(); });
+
+    // y += SPACE + HEIGHT;
+    // auto SnorkelDolphinSpawnBox = window->AddCheckBox("自然生成海豚潜水", x, y, 150, HEIGHT);
+    // SnorkelDolphinSpawnBox->SetCheck(settings.SnorkelDolphinSpawn);
+    // SnorkelDolphinSpawnBox->Connect([=] { settings.SnorkelDolphinSpawn = SnorkelDolphinSpawnBox->GetCheck(); });
+}
+
+AWindow* OtherPageWindow(int pageX, int pageY) {
+    auto window = mainWindow.AddWindow(pageX, pageY);
+
+    constexpr static int SPACE = 5;
+    constexpr static int WIDTH = 100;
+    // constexpr static int HEIGHT = 25;
+    // constexpr static int BTNWIDTH = 75;
+
+    int x = SPACE;
+    int y = 0;
+
+    CreateStageModifyGroup(window, x + WIDTH * 4 + SPACE * 6, y);
+
+    return window;
+}
+
 AOnAfterInject({
     __CheckASCII(GetToolPath(),
                  AMsgBox::Show("本工具只能在纯英文路径下才能正常运行, 你放置的路径: [" + GetToolPath() + "] 中含有非 ASCII 字符, 请将本工具的所有文件放置在纯英文路径下再次尝试运行");
@@ -2277,43 +2748,71 @@ AOnAfterInject({
     *(std::array<uint8_t, 3>*)0x471DCF = {0xEB, 0x24, 0x90};
 
     static constexpr int SPACE = 10;
-    static constexpr int TOPWIDTH = 100;
+    static constexpr int TOPWIDTH = 75;
     static constexpr int TOPHEIGHT = 25;
     int x = 0;
 
     auto basicPageBtn = mainWindow.AddPushButton("常规设置", x, 0, TOPWIDTH, TOPHEIGHT);
     x += TOPWIDTH;
+    auto displayPageBtn = mainWindow.AddPushButton("显示设置", x, 0, TOPWIDTH, TOPHEIGHT);
+    x += TOPWIDTH;
     auto keyPageBtn = mainWindow.AddPushButton("按键设置", x, 0, TOPWIDTH, TOPHEIGHT);
     x += TOPWIDTH;
     auto spawnPageBtn = mainWindow.AddPushButton("出怪设置", x, 0, TOPWIDTH, TOPHEIGHT);
+    x += TOPWIDTH;
+    auto otherPageBtn = mainWindow.AddPushButton("其他功能", x, 0, TOPWIDTH, TOPHEIGHT);
     mainWindow.AddPushButton("", 0, TOPHEIGHT, 635, 5);
 
     auto basicPage = BasicPageWindow(0, TOPHEIGHT + SPACE);
+    auto displayPage = DisplayPageWindow(0, TOPHEIGHT + SPACE);
     auto keyPage = KeyPageWindow(0, TOPHEIGHT + SPACE);
     auto spawnPage = SpawnPageWindow(0, TOPHEIGHT + SPACE);
+    auto otherPage = OtherPageWindow(0, TOPHEIGHT + SPACE);
 
     mainWindow.AddLabel("", 5, MAIN_HEIGHT - 78, 624, 44);
     mainWindow.AddLabel("信息:", 10, MAIN_HEIGHT - 78, 40, 44);
     infoLabel = mainWindow.AddLabel("", 50, MAIN_HEIGHT - 78, 579, 44);
 
     keyPage->Hide();
+    displayPage->Hide();
     spawnPage->Hide();
+    otherPage->Hide();
     basicPage->Show();
 
     AConnect(basicPageBtn, [=] {
         keyPage->Hide();
+        displayPage->Hide();
         spawnPage->Hide();
+        otherPage->Hide();
         basicPage->Show();
+    });
+    AConnect(displayPageBtn, [=] {
+        basicPage->Hide();
+        keyPage->Hide();
+        spawnPage->Hide();
+        otherPage->Hide();
+        displayPage->Show();
     });
     AConnect(keyPageBtn, [=] {
         basicPage->Hide();
+        displayPage->Hide();
         spawnPage->Hide();
+        otherPage->Hide();
         keyPage->Show();
     });
     AConnect(spawnPageBtn, [=] {
         basicPage->Hide();
+        displayPage->Hide();
         keyPage->Hide();
+        otherPage->Hide();
         spawnPage->Show();
+    });
+    AConnect(otherPageBtn, [=] {
+        basicPage->Hide();
+        displayPage->Hide();
+        keyPage->Hide();
+        spawnPage->Hide();
+        otherPage->Show();
     });
 });
 
@@ -2330,7 +2829,6 @@ AOnBeforeScript({
 AOnEnterFight({
     Paused = false;
     PausedSlowed = false;
-    AMaidCheats::Phase() = MaidPhase;
     aItemCollector.Stop();
     LeftmostVisibleArea.assign(6, 10);
     if (settings.AverageRowSpawn)
@@ -2338,8 +2836,12 @@ AOnEnterFight({
     aReplay.SetMaxSaveCnt(INT_MAX);
     aReplay.SetShowInfo(false);
     zombieListInfo_update();
-    if (settings.AutoRecordOnGameStart)
-        replayOp.startRecordOp();
+    // StageModify();
+    if (settings.AutoRecordOnGameStart && AMRef<int>(0x6A9EC0, 0x7F8) != AAsm::CHALLENGE_ICE) {
+        compressor->SetFilePath(settings.savePath + std::string("/") + GetCurTimeStr() + ".7z");
+        aReplay.StartRecord(std::round(settings.recordTickInterval));
+        Info("Replay : 开始录制");
+    }
     if (settings.ShowMe)
         tickShowMe.Start();
     else
@@ -2360,12 +2862,26 @@ AOnExitFight({
 
 // ALogger<AConsole> ConsoleLogger;
 
+// 不进家
+void __stdcall AsmCallBack1(AAsmCodeContext* context) {
+    context->eip = 0x4138C9;
+    Paused = true;
+    PausedSlowed = false;
+    ASetAdvancedPause(Paused, false, 0);
+    CreateCaption("The Zombies Ate Your Brains!", {BOTTOMFAST, 1000});
+}
+
 // 主体
 void AScript() {
     ASetReloadMode(AReloadMode::MAIN_UI_OR_FIGHT_UI);
     Lock(AGetPvzBase()->MPtr(0x82C)->MRef<int>(0x20), AGetPvzBase()->LevelId(), settings.ReadOnly);
     AGetInternalLogger()->SetLevel({});
     // ASetInternalLogger(ConsoleLogger);
+    AMaidCheats::Phase() = MaidPhase;
+
+    // 不进家
+    AInsertUniqueAsmCode(0x413400, AsmCallBack1);
+
     fightInfoPainter.SetFontSize(17); // 波数时间，僵尸计数
     lowIndexPainter.SetFont("Arial");
     lowIndexPainter.SetFontSize(12); // 低栈植物栈位样式
