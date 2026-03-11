@@ -2,8 +2,9 @@
 // 技术指导：Leonhard/铃仙/向量/零度
 // 本辅助工具目前版本使用的键控注入框架应使用AvZ2 2.8.5 20250711版本，源码不保证对更旧版本AvZ的兼容性
 
+#include <climits>
 #define UNICODE
-#define A_TAS_VERSION 202602040250
+#define A_TAS_VERSION 202602050330
 #include "AsmFunc.h"
 #include "Draw.h"
 #include "asm_insert_code/asm_insert_code.h"
@@ -47,7 +48,7 @@ constexpr auto GAME_DATA_PATH = "C:/ProgramData/PopCap Games/PlantsVsZombies/use
 
 // 预设按键
 static std::array<std::string, 33> keyDefaults = {"A", "1", "2", "C", "R", "T", "F5", "BACKSPACE", "Z", "X", "SHIFT", "V", "G", "B", "H", "Q", "W", "S", "D", "F", "E", "I", "J", "Y", "N", "U", "L", "P", "UP", "DOWN", "LEFT", "RIGHT", "O"};
-static std::array<const char*, 33> btnLabels = {"一键辅助", "减速一档", "加速一档", "0.25倍速", "10倍速", "跳到某波", "退出重进", "回档几帧", "高级暂停", "下一帧", "智能用卡", "卡槽置顶", "显示信息", "显示栈位", "智能铲除", "Dance快", "Dance慢", "女仆召唤", "女仆停滞", "女仆前进", "女仆解除", "自动收集", "小丑拦截", "气球拦截", "风炮修复", "隐藏UI", "跳过动画", "拍照模式", "视角上移", "视角下移", "视角左移", "视角右移", "PvZ初始化"};
+static std::array<const char*, 33> btnLabels = {"一键辅助", "减速一档", "加速一档", "0.25倍速", "10倍速", "跳到某波", "退出重进", "回档几帧", "高级暂停", "下一帧", "智能用卡", "卡槽置顶", "显示信息", "显示栈位", "智能铲除", "Dance快", "Dance慢", "女仆召唤", "女仆停滞", "女仆前进", "女仆解除", "自动收集", "小丑拦截", "气球拦截", "风炮修正", "隐藏UI", "跳过动画", "拍照模式", "视角上移", "视角下移", "视角左移", "视角右移", "PvZ初始化"};
 static std::array<std::string, 33> keyBindings;
 static std::array<AEdit*, 33> keyEdits;
 
@@ -73,6 +74,7 @@ struct {
     // Display
     bool ShowMe = true;
     bool PlantOffset = true;
+    bool ProduceCD = true;
     bool CobCD = true;
     bool CobGloomHP = true;
     bool LilyPotHP = true;
@@ -93,8 +95,10 @@ struct {
     bool JackExplosionRange = true;
     bool TotalHP = true;
     bool ShowSpeed = true;
+    bool VBEStat = true;
 
     // Display Color
+    uint32_t ProduceCDARGB = 0xFFFFFF00;
     uint32_t CobCDARGB = 0xFFFFFF00;
     uint32_t CobGloomHPARGB = 0xFF4CAF50;
     uint32_t LilyPotHPARGB = 0xFF4CAF50;
@@ -117,6 +121,7 @@ struct {
     uint32_t TotalHPARGB2 = 0xFF6D706C;
     uint32_t ShowSpeedARGB1 = 0xFFFF0000;
     uint32_t ShowSpeedARGB2 = 0xFF00FF00;
+    uint32_t VBEStatARGB = 0xFFFFFFFF;
 
     // Spawn
     bool Types[26] = {};
@@ -957,7 +962,19 @@ void DrawInfo() {
     }
     if (ShowInfoState == -1)
         return;
+    struct TimerData {
+        int max = 2500, last = INT_MAX;
+    };
+    static std::map<uint32_t, TimerData> ProduceCDMax;
     for (auto& Plant : aAlivePlantFilter) { // 显血
+        if (ARangeIn(Plant.Type(), {ASUNFLOWER, ASUN_SHROOM, AMARIGOLD, ATWIN_SUNFLOWER}) && !Plant.IsSleeping() && settings.ProduceCD) {
+            auto& data = ProduceCDMax[Plant.Id()];
+            int cur = Plant.MRef<int>(0x58);
+            if (cur > data.last)
+                data.max = cur;
+            data.last = cur;
+            barPainter.Draw(ABar(Plant.Xi() + 4, MyRowToY(Plant.Row() + 1, Plant.Col() + 1) + 17, 2500, data.max - cur, {2350}, 1, ABar::RIGHT, 72, 7, settings.ProduceCDARGB, 0xA0FFFFFF));
+        }
         if (Plant.Type() == ACOB_CANNON && AGetCobRecoverTime(Plant.Index()) && settings.CobCD)
             barPainter.Draw(ABar(Plant.Xi() + 4, Plant.Yi() + 17, 3475, 3475 - AGetCobRecoverTime(Plant.Index()), {350, 3350}, 1, ABar::RIGHT, 152, 7, settings.CobCDARGB, 0xA0FFFFFF));
         if (Plant.Hp() != Plant.HpMax()) {
@@ -1069,7 +1086,7 @@ void DrawInfo() {
         }
         if (Plantoffset < 0) {
             backgroundPainter.Draw(ARect(MyColToX(Plant.Col() + 1) + 5 + 4, MyRowToY(Plant.Row() + 1, Plant.Col() + 1) + 25, 14, RectHeight), settings.OtherPlantHPARGB);
-            lowIndexPainter.Draw(AText(std::format("L{}", Plantoffset), MyColToX(Plant.Col() + 1) + 4 + 4, MyRowToY(Plant.Row() + 1, Plant.Col() + 1) + 21), 0xFF000000);
+            lowIndexPainter.Draw(AText(std::format("L{}", -Plantoffset), MyColToX(Plant.Col() + 1) + 4 + 4, MyRowToY(Plant.Row() + 1, Plant.Col() + 1) + 21), 0xFF000000);
         }
     }
     // 有小丑开盒，绘制爆炸倒计时
@@ -1169,6 +1186,45 @@ void DrawInfo() {
             fightInfoPainter.Draw(AText(1000 / AGetPvzBase()->TickMs() % 100 ? std::format("{}", 1000 / AGetPvzBase()->TickMs() % 100) : "00", 21, 575), 0xFF000000);
         }
         fightInfoPainter.Draw(AText("x", 39, 575), 0xFF000000);
+    }
+
+    // 罐子统计
+    if (settings.VBEStat && AMRef<int>(0x6A9EC0, 0x7F8) == AAsm::SCARY_POTTER_ENDLESS) {
+        std::vector<int> VBStat(13, 0);
+        for (auto& Item : aAlivePlaceItemFilter) {
+            if (Item.Type() != 7)
+                continue;
+            if (Item.MRef<int>(0x44) == 1) {
+                if (Item.MRef<int>(0x40) == 0)
+                    ++VBStat[1];
+                if (Item.MRef<int>(0x40) == 52)
+                    ++VBStat[2];
+                if (Item.MRef<int>(0x40) == 18)
+                    ++VBStat[3];
+                if (Item.MRef<int>(0x40) == 5)
+                    ++VBStat[4];
+                if (Item.MRef<int>(0x40) == 17)
+                    ++VBStat[5];
+                if (Item.MRef<int>(0x40) == 4)
+                    ++VBStat[6];
+                if (Item.MRef<int>(0x40) == 3)
+                    ++VBStat[7];
+                if (Item.MRef<int>(0x40) == 25)
+                    ++VBStat[8];
+            } else if (Item.MRef<int>(0x44) == 3) {
+                ++VBStat[0];
+            } else if (Item.MRef<int>(0x44) == 2) {
+                if (Item.MRef<int>(0x3C) == 0)
+                    ++VBStat[9];
+                if (Item.MRef<int>(0x3C) == 4)
+                    ++VBStat[10];
+                if (Item.MRef<int>(0x3C) == 15)
+                    ++VBStat[11];
+                if (Item.MRef<int>(0x3C) == 23)
+                    ++VBStat[12];
+            }
+        }
+        fightInfoPainter.Draw(AText(std::format("{}阳\n\n{}单\n\n{}双\n\n{}三\n\n{}冰\n\n{}窝\n\n{}雷\n\n{}坚\n\n{}灯\n\n{}普\n\n{}桶\n\n{}丑\n\n{}巨", VBStat[0], VBStat[1], VBStat[2], VBStat[3], VBStat[4], VBStat[5], VBStat[6], VBStat[7], VBStat[8], VBStat[9], VBStat[10], VBStat[11], VBStat[12]), 770, 120), settings.VBEStatARGB);
     }
 }
 
@@ -1603,7 +1659,7 @@ void func25() {
     BalloonWarning = !BalloonWarning;
     CreateCaption(BalloonWarning ? "BalloonWarning: On" : "BalloonWarning: Off");
 }
-// 风炮修复
+// 风炮修正
 void func26() {
     *(uint8_t*)0x46DCE3 == 0x83 ? *(std::array<uint8_t, 10>*)0x46DCE3 = {0x75, 0x08, 0xD9, 0x46, 0x34, 0xD8, 0xC1, 0xD9, 0x5E, 0x34} : *(std::array<uint8_t, 10>*)0x46dce3 = {0x83, 0x7E, 0x5C, 0x0B, 0x75, 0x04, 0xDD, 0xD8, 0xEB, 0x1B};
     CreateCaption(*(uint8_t*)0x46DCE3 == 0x83 ? "FixWind: On" : "FixWind: Off");
@@ -2049,7 +2105,7 @@ static uint32_t HexToUL(const std::string& text, uint32_t originalVal) {
 
 void CreateShowInfoGroup(AWindow* window, int LeftEdge, int TopEdge) {
     constexpr static int SPACE = 5;
-    // constexpr static int WIDTH = 100;
+    constexpr static int WIDTH = 100;
     constexpr static int HEIGHT = 25;
     constexpr static int BTNWIDTH = 90;
     constexpr static int EDITWIDTH = 100;
@@ -2068,6 +2124,13 @@ void CreateShowInfoGroup(AWindow* window, int LeftEdge, int TopEdge) {
         else
             tickShowMe.Stop();
     });
+
+    y += SPACE + HEIGHT;
+
+    auto ProduceCDBox = window->AddCheckBox("生产冷却", x, y, BTNWIDTH, HEIGHT);
+    ProduceCDBox->SetCheck(settings.ProduceCD);
+    ProduceCDBox->Connect([=] { settings.ProduceCD = ProduceCDBox->GetCheck(); });
+    auto ProduceCDARGBEdit = window->AddEdit(std::format("{:08X}", settings.ProduceCDARGB), x + BTNWIDTH, y, EDITWIDTH, HEIGHT, ES_CENTER);
 
     y += SPACE + HEIGHT;
 
@@ -2125,18 +2188,22 @@ void CreateShowInfoGroup(AWindow* window, int LeftEdge, int TopEdge) {
     auto CraterARGBEdit = window->AddEdit(std::format("{:08X}", settings.CraterARGB), x + BTNWIDTH, y, EDITWIDTH, HEIGHT, ES_CENTER);
 
     y += SPACE + HEIGHT;
+    auto VBEStatBox = window->AddCheckBox("罐子统计", x, y, BTNWIDTH, HEIGHT);
+    VBEStatBox->SetCheck(settings.VBEStat);
+    VBEStatBox->Connect([=] { settings.VBEStat = VBEStatBox->GetCheck(); });
+    auto VBEStatARGBEdit = window->AddEdit(std::format("{:08X}", settings.VBEStatARGB), x + BTNWIDTH, y, EDITWIDTH, HEIGHT, ES_CENTER);
 
     y += SPACE + HEIGHT;
 
     // 下一列
-    x = LeftEdge + SPACE + 105;
+    x += WIDTH + SPACE;
     y = TopEdge;
     auto PlantOffsetBox = window->AddCheckBox("小喷偏移", x, y, BTNWIDTH, HEIGHT);
     PlantOffsetBox->SetCheck(settings.PlantOffset);
     PlantOffsetBox->Connect([=] { settings.PlantOffset = PlantOffsetBox->GetCheck(); });
 
     // 下一列
-    x = LeftEdge + SPACE + 210;
+    x += WIDTH + SPACE;
     y = TopEdge;
 
     auto HPStyleBox = window->AddCheckBox("炮阵样式", x, y, BTNWIDTH, HEIGHT);
@@ -2206,14 +2273,12 @@ void CreateShowInfoGroup(AWindow* window, int LeftEdge, int TopEdge) {
     auto ShowSpeedARGB1Edit = window->AddEdit(std::format("{:08X}", settings.ShowSpeedARGB1), x + BTNWIDTH, y, EDITWIDTH, HEIGHT, ES_CENTER);
     auto ShowSpeedARGB2Edit = window->AddEdit(std::format("{:08X}", settings.ShowSpeedARGB2), x + BTNWIDTH + SPACE + EDITWIDTH, y, EDITWIDTH, HEIGHT, ES_CENTER);
 
-    y += SPACE + HEIGHT;
-
-    // 下一列
     x = LeftEdge + SPACE + 305;
     y = TopEdge;
 
     auto ApplyAllBtn = window->AddPushButton("一键改色", x, y, BTNWIDTH, HEIGHT);
     ApplyAllBtn->Connect([=] {
+        settings.ProduceCDARGB = HexToUL(ProduceCDARGBEdit->GetText(), settings.ProduceCDARGB);
         settings.CobCDARGB = HexToUL(CobCDARGBEdit->GetText(), settings.CobCDARGB);
         settings.CobGloomHPARGB = HexToUL(CobGloomHPARGBEdit->GetText(), settings.CobGloomHPARGB);
         settings.PumpkinHPARGB = HexToUL(PumpkinHPARGBEdit->GetText(), settings.PumpkinHPARGB);
@@ -2223,6 +2288,7 @@ void CreateShowInfoGroup(AWindow* window, int LeftEdge, int TopEdge) {
         settings.JackExplosionRangeARGB = HexToUL(JackExplosionRangeARGBEdit->GetText(), settings.JackExplosionRangeARGB);
         settings.IcetrailARGB = HexToUL(IcetrailARGBEdit->GetText(), settings.IcetrailARGB);
         settings.CraterARGB = HexToUL(CraterARGBEdit->GetText(), settings.CraterARGB);
+        settings.VBEStatARGB = HexToUL(VBEStatARGBEdit->GetText(), settings.VBEStatARGB);
         settings.GigaHPARGB = HexToUL(GigaHPARGBEdit->GetText(), settings.GigaHPARGB);
         settings.GargHPARGB = HexToUL(GargHPARGBEdit->GetText(), settings.GargHPARGB);
         settings.FootballHPARGB = HexToUL(FootballHPARGBEdit->GetText(), settings.FootballHPARGB);
@@ -2477,7 +2543,7 @@ void zombieListInfo_update() {
     std::string name = "wave\n";
     std::string info_w[20];
     for (int i = 0; i < 20; i++)
-        info_w[i] = (i + 1 >= 10 ? "" : " ") + std::to_string(i + 1) + "\n";
+        info_w[i] = std::format("{:2}\n", i + 1);
     std::string sum = "sum\n";
     for (int i = 0; i <= 32; i++) {
         if (i == 1)
@@ -2486,9 +2552,9 @@ void zombieListInfo_update() {
             continue;
         name += name_list[i];
         name += +"\n";
-        sum += std::to_string(zombie_sum[i]) + "\n";
+        sum += std::format("{}\n", zombie_sum[i]);
         for (int w = 0; w < 20; w++)
-            info_w[w] += (zombie_list[i][w] >= 10 ? "" : " ") + std::to_string(zombie_list[i][w]) + "\n";
+            info_w[w] += std::format("{:2}\n", zombie_list[i][w]);
     }
 
     if (settings.ZombieList) {
